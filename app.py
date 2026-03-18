@@ -742,11 +742,13 @@ def chat_with_image():
     data = request.get_json()
     query = data.get('message', '').strip()
     image_data = data.get('image', '')
+    ocr_text = data.get('ocrText', '')  # 获取OCR识别结果
 
     if not image_data:
         return jsonify({'error': '图片不能为空'}), 400
 
     print(f"图片识别查询: {query}")
+    print(f"OCR识别结果: {ocr_text[:100] if ocr_text else '无'}...")
 
     # 提取base64数据
     if ',' in image_data:
@@ -755,6 +757,8 @@ def chat_with_image():
     try:
         # 构建多模态消息
         vision_prompt = "你是一个专业的WAF技术支持助手。请仔细分析这张图片，描述图片中的内容。如果图片中有文字、错误信息、配置界面、日志等内容，请详细描述。\n"
+        if ocr_text:
+            vision_prompt += f"\n图片中识别到的文字：{ocr_text}\n"
         if query:
             vision_prompt += f"用户问题：{query}"
 

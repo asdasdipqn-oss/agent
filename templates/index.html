@@ -239,6 +239,7 @@
             display: flex;
             gap: 8px;
             margin-top: 8px;
+            position: relative;
         }
 
         .action-btn {
@@ -250,6 +251,7 @@
             transition: all 0.2s ease;
             background: #e5e7eb;
             color: #6b7280;
+            position: relative;
         }
 
         .action-btn:hover {
@@ -526,6 +528,146 @@
                 padding: 15px 20px;
             }
         }
+
+        /* 隐藏的OCR结果区域 */
+        .ocr-result-container {
+            margin-bottom: 10px;
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 12px;
+            padding: 10px;
+        }
+
+        .ocr-result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #0369a1;
+        }
+
+        .ocr-result-toggle {
+            padding: 4px 8px;
+            background: transparent;
+            border: 1px solid #0369a1;
+            border-radius: 8px;
+            color: #0369a1;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .ocr-result-toggle:hover {
+            background: #0369a1;
+            color: white;
+        }
+
+        .ocr-result-text {
+            width: 100%;
+            min-height: 60px;
+            max-height: 150px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 8px;
+            font-size: 12px;
+            font-family: inherit;
+            resize: vertical;
+            background: white;
+            color: #374151;
+            display: none;
+        }
+
+        .ocr-result-text.visible {
+            display: block;
+        }
+
+        /* 点赞/贬低按钮Lottie动画 */
+        .action-lottie {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            pointer-events: none;
+            display: none;
+        }
+
+        .action-lottie.play {
+            display: block;
+        }
+
+        /* 输入框聚焦动画 */
+        .focus-lottie {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            z-index: 0;
+            opacity: 0.5;
+        }
+
+        /* 图片上传成功动画 */
+        .image-success-lottie {
+            position: absolute;
+            right: -10px;
+            top: -10px;
+            width: 40px;
+            height: 40px;
+            display: none;
+        }
+
+        .image-success-lottie.play {
+            display: block;
+        }
+
+        /* 发送按钮动画 */
+        .send-btn-lottie {
+            width: 24px;
+            height: 24px;
+        }
+
+        /* 消息动画 */
+        @keyframes messageSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px) scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        .message.bot .message-bubble {
+            animation: messageSlideIn 0.3s ease-out;
+        }
+
+        /* 输入框聚焦效果 */
+        .input-wrapper.focused {
+            box-shadow: 0 0 0 2px #3b82f6, 0 0 20px rgba(59, 130, 246, 0.2);
+        }
+
+        /* 发送按钮动画 */
+        @keyframes sendBtnPulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(0.9); }
+            100% { transform: scale(1); }
+        }
+
+        .send-btn.sending {
+            animation: sendBtnPulse 0.5s ease-in-out infinite;
+        }
+
+        /* 图片按钮动画 */
+        @keyframes imageBtnBounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+        }
+
+        .image-btn.has-image {
+            animation: imageBtnBounce 0.6s ease-in-out infinite;
+        }
     </style>
 </head>
 <body>
@@ -557,18 +699,34 @@
         </div>
 
         <div class="input-area" id="input-area">
+            <!-- 输入框聚焦动画容器 -->
+            <div id="focus-lottie" class="focus-lottie"></div>
+
             <!-- 图片预览区域 -->
             <div class="image-preview-container" id="image-preview-container">
                 <img src="" alt="预览" class="image-preview" id="image-preview">
                 <div class="image-preview-info" id="image-preview-info"></div>
                 <button class="image-preview-remove" onclick="removeImage()">×</button>
+                <!-- 图片上传成功动画 -->
+                <div id="image-success-lottie" class="image-success-lottie"></div>
+            </div>
+
+            <!-- 隐藏的OCR结果区域 -->
+            <div id="ocr-result-container" class="ocr-result-container" style="display: none;">
+                <div class="ocr-result-header">
+                    <span>📝 识别到的文字</span>
+                    <button class="ocr-result-toggle" onclick="toggleOcrResult()">显示/隐藏</button>
+                </div>
+                <textarea id="ocr-result-text" class="ocr-result-text" readonly placeholder="识别结果将显示在这里..."></textarea>
             </div>
 
             <div class="input-wrapper">
-                <input type="text" id="user-input" placeholder="请输入您的问题，或上传图片..." autocomplete="off" onkeypress="handleKeyPress(event)">
+                <input type="text" id="user-input" placeholder="请输入您的问题，或上传图片..." autocomplete="off" onkeypress="handleKeyPress(event)" onfocus="handleInputFocus()" onblur="handleInputBlur()">
                 <button class="image-btn" id="image-btn" onclick="document.getElementById('image-input').click()" title="上传图片">📷</button>
                 <input type="file" id="image-input" accept="image/*" onchange="handleImageSelect(event)">
-                <button class="send-btn" id="send-btn" onclick="sendUserMessage()">➤</button>
+                <button class="send-btn" id="send-btn" onclick="sendUserMessage()">
+                    <div id="send-btn-lottie" class="send-btn-lottie"></div>
+                </button>
             </div>
         </div>
     </div>
@@ -649,6 +807,13 @@
         // 图片相关变量
         let selectedImage = null;
         let selectedImageBase64 = null;
+        let manualInputText = ''; // 用户手动输入的文字
+        let ocrResult = ''; // OCR识别结果（隐藏）
+
+        // 监听用户手动输入
+        userInput.addEventListener('input', function() {
+            manualInputText = this.value;
+        });
         const MAX_IMAGE_SIZE = 4 * 1024 * 1024; // 4MB
         const MAX_IMAGE_DIMENSION = 1920; // 最大边长
 
@@ -693,9 +858,11 @@
 
             // 点赞/贬低按钮（仅机器人消息显示）
             const actions = isUser ? '' : `
-                <div class="message-actions">
+                <div class="message-actions" style="position: relative;">
                     <button class="action-btn like" onclick="handleFeedback(this, 'like')">👍</button>
                     <button class="action-btn dislike" onclick="handleFeedback(this, 'dislike')">👎</button>
+                    <div class="action-lottie like-lottie" id="like-lottie-${Date.now()}"></div>
+                    <div class="action-lottie dislike-lottie" id="dislike-lottie-${Date.now()}"></div>
                 </div>
             `;
 
@@ -720,15 +887,49 @@
             }
 
             // 切换当前按钮状态
-            if (btn.classList.contains(type === 'like' ? 'liked' : 'disliked')) {
-                btn.classList.remove('liked', 'disliked');
-            } else {
+            const isAdding = !btn.classList.contains(type === 'like' ? 'liked' : 'disliked');
+            if (isAdding) {
                 btn.classList.add(type === 'like' ? 'liked' : 'disliked');
+                // 播放Lottie动画
+                playFeedbackAnimation(parent, type);
+            } else {
+                btn.classList.remove(type === 'like' ? 'liked' : 'disliked');
             }
         }
 
+        // 播放反馈Lottie动画
+        function playFeedbackAnimation(parent, type) {
+            const lottieContainer = parent.querySelector(`.${type}-lottie`);
+            if (!lottieContainer) return;
+
+            // 点赞用爱心动画，贬低用叉叉动画
+            const animJson = type === 'like'
+                ? 'https://assets2.lottiefiles.com/packages/lf20_9k9rmsfp.json' // 爱心动画
+                : 'https://assets9.lottiefiles.com/packages/lf20_u4yrau.json'; // 叉叉动画
+
+            const anim = lottie.loadAnimation({
+                container: lottieContainer,
+                renderer: 'svg',
+                loop: false,
+                autoplay: true,
+                path: animJson
+            });
+
+            lottieContainer.classList.add('play');
+            lottieContainer.style.left = type === 'like' ? '-5px' : '25px';
+            lottieContainer.style.top = '-5px';
+
+            // 动画结束后隐藏
+            anim.addEventListener('complete', () => {
+                setTimeout(() => {
+                    lottieContainer.classList.remove('play');
+                    anim.destroy();
+                }, 500);
+            });
+        }
+
         async function sendUserMessage() {
-            const message = userInput.value.trim();
+            const message = manualInputText.trim();
             // 允许只发送图片，或只发送文字，或两者都发送
             if (!message && !selectedImageBase64) return;
 
@@ -743,8 +944,15 @@
             const userMsgElement = createMessageElement(userMessageContent, true, getCurrentTime());
             chatContainer.appendChild(userMsgElement);
 
+            // 播放用户消息动画
+            playUserMessageAnim(userMsgElement);
+
+            // 播放发送按钮动画
+            playSendButtonAnim();
+
             // 清空输入框和图片
             userInput.value = '';
+            manualInputText = ''; // 清空手动输入变量
             removeImage();
 
             // 滚动到底部
@@ -768,14 +976,19 @@
                     <div class="message-bubble">
                         <span class="streaming-content"></span>
                     </div>
-                    <div class="message-actions" style="display: none;">
+                    <div class="message-actions" style="display: none; position: relative;">
                         <button class="action-btn like" onclick="handleFeedback(this, 'like')">👍</button>
                         <button class="action-btn dislike" onclick="handleFeedback(this, 'dislike')">👎</button>
+                        <div class="action-lottie like-lottie" id="like-lottie-${Date.now()}"></div>
+                        <div class="action-lottie dislike-lottie" id="dislike-lottie-${Date.now()}"></div>
                     </div>
                     <div class="message-time">${getCurrentTime()}</div>
                 </div>
             `;
             chatContainer.appendChild(botMsgDiv);
+
+            // 播放机器人消息动画
+            playBotMessageAnim(botMsgDiv);
 
             // 显示Lottie加载动画
             const loadingAnim = initLoadingLottie();
@@ -786,9 +999,34 @@
             try {
                 // 根据是否有图片选择不同的API
                 const apiEndpoint = selectedImageBase64 ? '/api/chat_with_image' : '/api/chat';
-                const requestBody = selectedImageBase64
-                    ? { message: message || '请描述这张图片的内容', image: selectedImageBase64 }
-                    : { message };
+
+                // 构建请求体，包含OCR结果
+                let requestBody;
+                if (selectedImageBase64) {
+                    // 构建问题：结合输入框文字和OCR结果
+                    let queryMessage;
+                    if (message && ocrResult) {
+                        // 两者都有，结合起来
+                        queryMessage = message + ' ' + ocrResult;
+                    } else if (message) {
+                        // 只有输入框文字
+                        queryMessage = message;
+                    } else if (ocrResult) {
+                        // 只有OCR结果
+                        queryMessage = ocrResult;
+                    } else {
+                        // 都没有
+                        queryMessage = '请描述这张图片的内容';
+                    }
+
+                    requestBody = {
+                        message: queryMessage,
+                        image: selectedImageBase64,
+                        ocrText: ocrResult
+                    };
+                } else {
+                    requestBody = { message };
+                }
 
                 const response = await fetch(apiEndpoint, {
                     method: 'POST',
@@ -957,13 +1195,24 @@
                 if (response.ok) {
                     const data = await response.json();
                     if (data.text && data.text !== '没有识别到文字') {
-                        // 把识别结果添加到输入框
-                        const currentText = userInput.value.trim();
-                        if (currentText) {
-                            userInput.value = currentText + ' ' + data.text;
-                        } else {
+                        // 保存OCR结果到隐藏变量
+                        ocrResult = data.text;
+
+                        // 检查输入框是否有文字
+                        const currentText = manualInputText.trim();
+
+                        if (!currentText) {
+                            // 输入框没有文字，把OCR结果放到输入框
                             userInput.value = data.text;
+                            manualInputText = data.text; // 同步更新变量
+                        } else {
+                            // 输入框有文字，显示OCR结果区域供参考
+                            const ocrContainer = document.getElementById('ocr-result-container');
+                            const ocrText = document.getElementById('ocr-result-text');
+                            ocrText.value = data.text;
+                            ocrContainer.style.display = 'block';
                         }
+
                         // 聚焦输入框
                         userInput.focus();
                     }
@@ -971,6 +1220,100 @@
             } catch (err) {
                 console.error('OCR识别失败:', err);
             }
+        }
+
+        // 切换OCR结果显示/隐藏
+        function toggleOcrResult() {
+            const ocrText = document.getElementById('ocr-result-text');
+            ocrText.classList.toggle('visible');
+        }
+
+        // 输入框聚焦动画
+        let focusAnim = null;
+        function handleInputFocus() {
+            const inputWrapper = document.querySelector('.input-wrapper');
+            inputWrapper.classList.add('focused');
+
+            // 播放聚焦动画
+            const focusContainer = document.getElementById('focus-lottie');
+            if (!focusAnim) {
+                focusAnim = lottie.loadAnimation({
+                    container: focusContainer,
+                    renderer: 'svg',
+                    loop: true,
+                    autoplay: false,
+                    path: 'https://assets3.lottiefiles.com/packages/lf20_9k9rmsfp.json'
+                });
+            }
+            focusAnim.play();
+        }
+
+        function handleInputBlur() {
+            const inputWrapper = document.querySelector('.input-wrapper');
+            inputWrapper.classList.remove('focused');
+
+            if (focusAnim) {
+                focusAnim.stop();
+            }
+        }
+
+        // 发送按钮动画
+        let sendBtnAnim = null;
+        function playSendButtonAnim() {
+            const sendBtn = document.getElementById('send-btn');
+            const sendBtnLottieContainer = document.getElementById('send-btn-lottie');
+
+            sendBtn.classList.add('sending');
+
+            if (!sendBtnAnim) {
+                sendBtnAnim = lottie.loadAnimation({
+                    container: sendBtnLottieContainer,
+                    renderer: 'svg',
+                    loop: false,
+                    autoplay: false,
+                    path: 'https://assets9.lottiefiles.com/packages/lf20_u4yrau.json'
+                });
+            }
+            sendBtnAnim.play();
+
+            sendBtnAnim.addEventListener('complete', () => {
+                sendBtn.classList.remove('sending');
+            });
+        }
+
+        // 图片上传成功动画
+        let imageSuccessAnim = null;
+        function playImageSuccessAnim() {
+            const container = document.getElementById('image-preview-container');
+            const successContainer = document.getElementById('image-success-lottie');
+
+            successContainer.classList.add('play');
+
+            if (!imageSuccessAnim) {
+                imageSuccessAnim = lottie.loadAnimation({
+                    container: successContainer,
+                    renderer: 'svg',
+                    loop: false,
+                    autoplay: false,
+                    path: 'https://assets2.lottiefiles.com/packages/lf20_9k9rmsfp.json'
+                });
+            }
+            imageSuccessAnim.play();
+
+            imageSuccessAnim.addEventListener('complete', () => {
+                successContainer.classList.remove('play');
+            });
+        }
+
+        // 用户消息发送动画
+        let userMsgAnim = null;
+        function playUserMessageAnim(messageElement) {
+            messageElement.style.animation = 'messageSlideIn 0.3s ease-out';
+        }
+
+        // 机器人消息到达动画
+        function playBotMessageAnim(messageElement) {
+            messageElement.querySelector('.message-bubble').style.animation = 'messageSlideIn 0.4s ease-out';
         }
 
         function showImagePreview(dataUrl, filename, filesize) {
@@ -987,19 +1330,29 @@
 
             container.classList.add('active');
             imageBtn.classList.add('has-image');
+
+            // 播放图片上传成功动画
+            playImageSuccessAnim();
         }
 
         function removeImage() {
             selectedImage = null;
             selectedImageBase64 = null;
+            ocrResult = ''; // 清除OCR结果
 
             const container = document.getElementById('image-preview-container');
             const imageBtn = document.getElementById('image-btn');
             const imageInput = document.getElementById('image-input');
+            const ocrContainer = document.getElementById('ocr-result-container');
+            const ocrText = document.getElementById('ocr-result-text');
 
             container.classList.remove('active');
             imageBtn.classList.remove('has-image');
             imageInput.value = '';
+
+            // 隐藏OCR结果区域
+            ocrContainer.style.display = 'none';
+            ocrText.value = '';
         }
 
         // 拖拽上传支持

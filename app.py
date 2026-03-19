@@ -5,81 +5,15 @@
 """
 import json
 import os
-import pymysql
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context
 from flask_cors import CORS
 import re
 from datetime import datetime
 
-# MySQL 数据库配置
-DB_CONFIG = {
-    'host': os.environ.get('DB_HOST', 'localhost'),
-    'port': int(os.environ.get('DB_PORT', 3306)),
-    'user': os.environ.get('DB_USER', 'root'),
-    'password': os.environ.get('DB_PASSWORD', '123456'),
-    'database': os.environ.get('DB_NAME', 'waf_agent'),
-    'charset': 'utf8mb4'
-}
-
 # 本地文件存储路径
 FEEDBACK_FILE = os.path.join(os.path.dirname(__file__), 'feedback_data.json')
 
-# MySQL连接状态
-MYSQL_AVAILABLE = False
 
-# 初始化数据库表
-def init_db():
-    """初始化数据库和表"""
-    global MYSQL_AVAILABLE
-    try:
-        # 连接数据库
-        conn = pymysql.connect(
-            host=DB_CONFIG['host'],
-            port=DB_CONFIG['port'],
-            user=DB_CONFIG['user'],
-            password=DB_CONFIG['password'],
-            charset=DB_CONFIG['charset'],
-            connect_timeout=5
-        )
-        with conn.cursor() as cursor:
-            # 创建数据库
-            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_CONFIG['database']}")
-            cursor.execute(f"USE {DB_CONFIG['database']}")
-
-            # 创建贬低表
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS bad (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_question TEXT NOT NULL,
-                    bot_answer TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_created_at (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-
-            # 创建点赞表
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS good (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    user_question TEXT NOT NULL,
-                    bot_answer TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    INDEX idx_created_at (created_at)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """)
-
-        conn.commit()
-        conn.close()
-        MYSQL_AVAILABLE = True
-        print("数据库初始化成功")
-    except Exception as e:
-        print(f"数据库初始化失败: {e}")
-        MYSQL_AVAILABLE = False
-
-# 初始化数据库
-init_db()
-
-# 本地文件存储函数
 def load_feedback_from_file():
     """从本地文件加载反馈数据"""
     if os.path.exists(FEEDBACK_FILE):
@@ -101,17 +35,6 @@ def save_feedback_to_file(feedback_list):
 # 加载本地反馈数据
 FEEDBACK_HISTORY = load_feedback_from_file()
 
-# 获取数据库连接
-def get_db_connection():
-    return pymysql.connect(
-        host=DB_CONFIG['host'],
-        port=DB_CONFIG['port'],
-        user=DB_CONFIG['user'],
-        password=DB_CONFIG['password'],
-        database=DB_CONFIG['database'],
-        charset=DB_CONFIG['charset']
-    )
-
 # 使用OpenAI SDK (兼容SiliconFlow API)
 try:
     import openai
@@ -128,6 +51,16 @@ BASE_URL = os.environ.get('OPENAI_BASE_URL', 'https://aiapi.chaitin.net/v1')
 MODEL = 'qwen2.5-72b-instruct'
 MODEL_VISION = 'qwen-vl-plus'  # 视觉模型
 EMBEDDING_MODEL = 'bge-m3'  # embedding模型
+
+# 缓存配置
+QUERY_CACHE = {}  # 问题缓存：{问题: {answer, timestamp, llm_used}}
+CACHE_TTL = 3600  # 缓存有效期（秒）
+MAX_CACHE_SIZE = 100  # 最大缓存数量
+
+# 对话上下文配置
+CONVERSATION_HISTORY = {}  # 会话历史：{session_id: [{role, content, timestamp}]}
+MAX_HISTORY_LENGTH = 6  # 每个会话保留的历史消息数
+DEFAULT_SESSION_ID = 'default'  # 默认会话ID
 
 # 配置OpenAI客户端
 client = None
@@ -152,7 +85,7 @@ def load_knowledge():
 KNOWLEDGE = load_knowledge()
 
 # 相似度阈值
-SIMILARITY_THRESHOLD = 0.8
+SIMILARITY_THRESHOLD = 0.8  # 高匹配度阈值，超过此值需要LLM整合多个答案
 
 
 def extract_keywords_with_llm(query):
@@ -275,21 +208,126 @@ def cosine_similarity(vec1, vec2):
         return 0
     return dot_product / (norm1 * norm2)
 
+# ============= 缓存机制 =============
 
-# 知识库embedding缓存
+def normalize_query(query):
+    """标准化查询文本，用于缓存key"""
+    # 去除多余空格，统一大小写
+    return ' '.join(query.lower().split())
+
+def get_from_cache(query):
+    """从缓存获取答案"""
+    normalized = normalize_query(query)
+    if normalized in QUERY_CACHE:
+        cached = QUERY_CACHE[normalized]
+        import time
+        if time.time() - cached['timestamp'] < CACHE_TTL:
+            print(f"缓存命中: {query[:30]}...")
+            return cached
+        else:
+            # 缓存过期，删除
+            del QUERY_CACHE[normalized]
+    return None
+
+def save_to_cache(query, answer_chunks, llm_used=True):
+    """保存答案到缓存"""
+    global QUERY_CACHE
+    normalized = normalize_query(query)
+    import time
+
+    # 如果缓存已满，删除最旧的
+    if len(QUERY_CACHE) >= MAX_CACHE_SIZE:
+        oldest_key = min(QUERY_CACHE.keys(), key=lambda k: QUERY_CACHE[k]['timestamp'])
+        del QUERY_CACHE[oldest_key]
+
+    QUERY_CACHE[normalized] = {
+        'answer_chunks': list(answer_chunks),  # 转换为列表以便缓存
+        'timestamp': time.time(),
+        'llm_used': llm_used
+    }
+    print(f"已缓存查询: {query[:30]}...")
+
+def clear_cache():
+    """清空缓存"""
+    global QUERY_CACHE
+    QUERY_CACHE = {}
+    print("缓存已清空")
+
+# ============= 对话上下文 =============
+
+def add_to_conversation(session_id, role, content):
+    """添加消息到对话历史"""
+    global CONVERSATION_HISTORY
+    if session_id not in CONVERSATION_HISTORY:
+        CONVERSATION_HISTORY[session_id] = []
+
+    import time
+    CONVERSATION_HISTORY[session_id].append({
+        'role': role,
+        'content': content,
+        'timestamp': time.time()
+    })
+
+    # 限制历史长度
+    if len(CONVERSATION_HISTORY[session_id]) > MAX_HISTORY_LENGTH:
+        CONVERSATION_HISTORY[session_id] = CONVERSATION_HISTORY[session_id][-MAX_HISTORY_LENGTH:]
+
+def get_conversation_context(session_id=DEFAULT_SESSION_ID, max_turns=4):
+    """获取对话上下文，用于LLM"""
+    if session_id not in CONVERSATION_HISTORY:
+        return []
+
+    history = CONVERSATION_HISTORY[session_id]
+    # 返回最近 max_turns 轮对话
+    return history[-max_turns * 2:] if len(history) > 2 else []
+
+def format_conversation_history(history):
+    """格式化对话历史为LLM可读格式"""
+    if not history:
+        return "（无历史对话）"
+
+    formatted = []
+    for msg in history:
+        role_name = "用户" if msg['role'] == 'user' else "助手"
+        formatted.append(f"{role_name}：{msg['content']}")
+    return "\n".join(formatted)
+
+def clear_conversation(session_id=DEFAULT_SESSION_ID):
+    """清空指定会话的历史"""
+    global CONVERSATION_HISTORY
+    if session_id in CONVERSATION_HISTORY:
+        del CONVERSATION_HISTORY[session_id]
+        print(f"会话 {session_id} 历史已清空")
+
+# ============= 知识库embedding缓存 =============
 KNOWLEDGE_EMBEDDINGS = {}
 
 
 def get_embeddings_for_knowledge():
-    """预计算知识库所有问题的embedding"""
+    """预计算知识库所有问题的embedding（增量更新）"""
     global KNOWLEDGE_EMBEDDINGS
     print("开始计算知识库embedding...")
+    count = 0
     for i, item in enumerate(KNOWLEDGE):
         if i not in KNOWLEDGE_EMBEDDINGS:
             emb = get_embedding(item['问题描述'])
             if emb:
                 KNOWLEDGE_EMBEDDINGS[i] = emb
-    print(f"知识库embedding计算完成，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
+                count += 1
+    print(f"知识库embedding计算完成，新增 {count} 条，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
+
+
+def update_knowledge_embedding():
+    """更新知识库embedding（新增或变更后调用）"""
+    global KNOWLEDGE_EMBEDDINGS
+    print("更新知识库embedding...")
+    # 重新计算全部
+    KNOWLEDGE_EMBEDDINGS = {}
+    for i, item in enumerate(KNOWLEDGE):
+        emb = get_embedding(item['问题描述'])
+        if emb:
+            KNOWLEDGE_EMBEDDINGS[i] = emb
+    print(f"知识库embedding更新完成，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
 
 
 def find_by_embedding(query, top_k=20):
@@ -487,27 +525,27 @@ def polish_answer_with_llm(query, answer):
                 return None
 
     try:
-        prompt = f"""你是雷池WAF技术支持客服，风格友好、专业、耐心。请根据知识库答案，直接回答用户问题。
-
-要求：
-1. 语气友好、有耐心，让用户感到温暖
-2. 表达专业、准确
-3. 直接输出答案，不要重复用户问题
-4. 如果答案较长，可以适当分段使内容更易读
+        prompt = f"""你是雷池WAF技术支持客服。请严格基于以下知识库答案回复用户。
 
 知识库答案：
 {answer}
+
+重要规则：
+1. 只基于知识库答案进行润色，不要添加任何知识库中没有的信息
+2. 保持语言友好、专业
+3. 如果知识库答案不完整，也不要自己补充信息
+4. 只润色表达方式，不改变答案内容
 
 请直接输出润色后的答案。"""
 
         stream = client.chat.completions.create(
             model=MODEL,
             messages=[
-                {'role': 'system', 'content': '你是雷池WAF技术支持专家，回答问题专业、礼貌、简洁。'},
+                {'role': 'system', 'content': '你是雷池WAF技术支持专家，严格基于知识库内容回答问题，不添加任何知识库以外的信息。'},
                 {'role': 'user', 'content': prompt}
             ],
             max_tokens=500,
-            temperature=0.7,
+            temperature=0.5,
             stream=True
         )
 
@@ -560,6 +598,7 @@ def add_to_knowledge():
         return jsonify({'success': False, 'message': '问题和答案不能为空'}), 400
 
     # 添加到知识库
+    new_index = len(KNOWLEDGE)
     KNOWLEDGE.append({
         '问题描述': question,
         '问题处理结果': answer
@@ -569,7 +608,20 @@ def add_to_knowledge():
     try:
         with open(KNOWLEDGE_FILE, 'w', encoding='utf-8') as f:
             json.dump(KNOWLEDGE, f, ensure_ascii=False, indent=2)
-        return jsonify({'success': True, 'message': '添加成功'})
+
+        # 自动更新embedding缓存
+        emb = get_embedding(question)
+        if emb:
+            global KNOWLEDGE_EMBEDDINGS
+            KNOWLEDGE_EMBEDDINGS[new_index] = emb
+            print(f"新条目embedding已缓存，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
+
+        # 清空相关缓存
+        clear_cache()
+
+        # 返回knowledgeId给前端
+        knowledge_id = f"kb_{new_index}"
+        return jsonify({'success': True, 'message': '添加成功', 'knowledgeId': knowledge_id})
     except Exception as e:
         # 回滚内存中的数据
         KNOWLEDGE.pop()
@@ -577,41 +629,127 @@ def add_to_knowledge():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """问答接口 - 流式输出"""
+    """问答接口 - 流式输出（优化版）"""
     data = request.get_json()
     query = data.get('message', '').strip()
+    session_id = data.get('session_id', DEFAULT_SESSION_ID)
 
     if not query:
         return jsonify({'error': '问题不能为空'}), 400
 
-    # 第一步：用LLM提取关键词
-    keywords = extract_keywords_with_llm(query)
+    # 保存用户问题到对话历史
+    add_to_conversation(session_id, 'user', query)
 
-    # 第二步：用关键词检索知识库
-    if keywords:
-        matches = find_best_match(keywords)
-    else:
-        matches = find_best_match(query)
+    # 第一步：检查缓存
+    cached = get_from_cache(query)
+    if cached:
+        # 从缓存返回答案
+        def generate_from_cache():
+            yield "data: {\"type\":\"start\"}\n\n"
+            for chunk in cached['answer_chunks']:
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'llm_used': cached['llm_used']})}\n\n"
+        return Response(generate_from_cache(), mimetype='text/event-stream', headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        })
 
     print(f"查询: {query}")
-    print(f"关键词: {keywords}")
-    print(f"匹配数: {len(matches)}, 最高分: {matches[0][0] if matches else 0}")
 
-    # 检查是否有达到阈值(0.8)的匹配
-    best_score = matches[0][0] if matches else 0
+    # 第二步：LLM分析用户问题，提取关键信息
+    print("正在分析用户问题...")
+    try:
+        global client
+        if not client and OPENAI_SDK_AVAILABLE and API_KEY:
+            try:
+                client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
+            except:
+                pass
 
-    if best_score < SIMILARITY_THRESHOLD:
-        # 相似度不够，用LLM分析问题本质再检索
-        print(f"最高分 {best_score} < 阈值 {SIMILARITY_THRESHOLD}，尝试本质分析检索")
-        # 这里会让 get_llm_response_stream_v2 内部做本质分析
-        # 继续流程，LLM会再次分析问题本质
+        analysis_response = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {'role': 'system', 'content': '你是雷池WAF技术支持专家。请分析用户问题，提取关键信息和意图。'},
+                {'role': 'user', 'content': f"""用户问题：{query}
 
-    if not matches:
-        # 找不到匹配时也用SSE格式返回
+请分析这个问题，提取以下信息：
+1. 问题的核心意图（如：配置、报错、日志分析、规则设置等）
+2. 关键词（3-5个最相关的技术术语）
+3. 问题的模块/功能（如：WAF、CC防护、规则引擎等）
+
+请以JSON格式返回分析结果：
+{{
+  "intent": "问题意图",
+  "keywords": ["关键词1", "关键词2", "关键词3"],
+  "module": "相关模块"
+}}"""},
+            ],
+            max_tokens=200,
+            temperature=0.3
+        )
+        analysis_result = json.loads(analysis_response.choices[0].message.content.strip())
+        print(f"问题分析结果: {analysis_result}")
+    except Exception as e:
+        print(f"问题分析失败: {e}，使用原问题检索")
+        analysis_result = {'keywords': [query], 'intent': 'general', 'module': 'general'}
+
+    # 第三步：基于分析结果检索知识库
+    # 使用分析出的关键词进行检索
+    search_keywords = analysis_result.get('keywords', [query])
+    print(f"使用关键词检索: {search_keywords}")
+
+    # 关键词检索
+    all_matches = []
+    for keyword in search_keywords[:3]:
+        kw_matches = find_best_match(keyword, top_k=5)
+        all_matches.extend(kw_matches)
+
+    # 去重
+    seen = {}
+    merged_matches = []
+    for score, match in all_matches:
+        if match['问题描述'] not in seen:
+            seen[match['问题描述']] = score
+            merged_matches.append((score, match))
+
+    # 按相似度排序
+    merged_matches.sort(key=lambda x: x[0], reverse=True)
+    merged_matches = merged_matches[:10]
+    print(f"检索匹配: {len(merged_matches)} 条")
+
+    # 第四步：获取对话上下文
+    conv_history = get_conversation_context(session_id)
+    conv_context = format_conversation_history(conv_history) if conv_history else ""
+
+    # 第五步：检查高匹配度答案并构建知识库上下文
+    high_matches = [(score, match) for score, match in merged_matches if score >= SIMILARITY_THRESHOLD]
+    print(f"高匹配度答案（score>={SIMILARITY_THRESHOLD}）: {len(high_matches)} 条")
+
+    if high_matches:
+        # 有多个高匹配度答案，构建包含所有答案的上下文
+        knowledge_context_parts = ["【知识库参考内容】\n\n以下是知识库中相似度较高的答案，请整合后回复：\n\n"]
+        for i, (score, match) in enumerate(high_matches[:5], 1):
+            knowledge_context_parts.append(f"答案{i}（相似度: {score:.2f}）：\n")
+            knowledge_context_parts.append(f"问题：{match['问题描述']}\n")
+            knowledge_context_parts.append(f"解答：{match['问题处理结果']}\n\n")
+        knowledge_context = "".join(knowledge_context_parts)
+    else:
+        # 没有高匹配度答案
+        knowledge_context_parts = ["【知识库参考内容】\n\n"]
+        for i, (score, match) in enumerate(merged_matches[:3], 1):
+            knowledge_context_parts.append(f"参考{i}（相似度: {score:.2f}）：\n")
+            knowledge_context_parts.append(f"问题：{match['问题描述']}\n")
+            knowledge_context_parts.append(f"解答：{match['问题处理结果']}\n\n")
+        knowledge_context = "".join(knowledge_context_parts)
+
+    # 第六步：LLM基于知识库生成答案
+
+    # 如果没有匹配结果，返回固定话术
+    if not merged_matches:
         def generate_no_match():
             yield "data: {\"type\":\"start\"}\n\n"
-            answer = '抱歉，我没有找到与您问题相关的答案。建议您尝试用其他关键词描述您的问题，或者联系技术支持获取帮助。'
-            yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+            yield f"data: {json.dumps({'type': 'chunk', 'content': '抱歉，此问题超出我的能力范畴，请联系群里相关的技术人员。'})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
         return Response(generate_no_match(), mimetype='text/event-stream', headers={
             'Cache-Control': 'no-cache',
@@ -619,83 +757,107 @@ def chat():
             'X-Accel-Buffering': 'no'
         })
 
-    # 获取最佳匹配
-    best_score, best_match = matches[0]
+    # 有多个高匹配度答案，LLM整合多个答案
+    if len(high_matches) >= 2:
+        prompt = f"""你是雷池WAF技术支持客服。请整合以下多个知识库答案后回复用户。
 
-    # 判断是否达到阈值(0.8)
-    if best_score >= SIMILARITY_THRESHOLD:
-        # 达到阈值，使用知识库答案但需要LLM润色
-        print(f"匹配度 {best_score:.2f} >= {SIMILARITY_THRESHOLD}，知识库答案需LLM润色")
+{knowledge_context}
 
-        # 构建上下文让LLM润色
-        context = build_context_from_knowledge(query, matches[:1])
+用户问题：{query}
 
-        def generate_with_knowledge():
-            yield "data: {\"type\":\"start\"}\n\n"
+问题分析结果：
+- 意图：{analysis_result.get('intent', '未知')}
+- 关键词：{', '.join(analysis_result.get('keywords', []))}
 
-            # 调用LLM润色知识库答案
-            llm_answer = polish_answer_with_llm(query, best_match['问题处理结果'])
+重要规则：
+1. 只整合知识库中提供的答案，不要添加任何知识库以外的信息
+2. 如果多个答案之间有冲突，请指出并提供最合适的建议
+3. 整合后的答案应该全面、准确
+4. 不要编造或假设任何知识库中没有的内容
 
-            if llm_answer:
-                has_content = False
-                for chunk in llm_answer:
-                    if chunk:
-                        has_content = True
-                        yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-                if has_content:
-                    yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
-                else:
-                    # LLM失败，使用原始知识库答案
-                    answer = polite_response(best_match['问题处理结果'], query)
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
-                    yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
-            else:
-                # LLM失败，使用原始知识库答案
-                answer = polite_response(best_match['问题处理结果'], query)
-                yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
+请整合以上知识库答案，给出一个完整、准确的回复。"""
+    else:
+        # 单个答案或没有高匹配度，正常生成
+        prompt = f"""你是雷池WAF技术支持客服。请严格按照以下知识库内容回答用户问题。
 
-        return Response(generate_with_knowledge(), mimetype='text/event-stream', headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'
-        })
+【知识库内容】
+{knowledge_context}
 
-    # 未达到阈值，让LLM分析本质问题后检索
-    print(f"匹配度 {best_score:.2f} < {SIMILARITY_THRESHOLD}，LLM分析本质后检索")
+用户问题：{query}
 
-    # 构建上下文
-    context = build_context_from_knowledge(query, matches)
+问题分析结果：
+- 意图：{analysis_result.get('intent', '未知')}
+- 关键词：{', '.join(analysis_result.get('keywords', []))}
 
-    # 流式调用LLM
-    def generate():
-        # 先发送LLM使用标识
+重要规则：
+1. 只使用知识库中提供的信息进行回答
+2. 如果知识库内容可以回答问题，请直接给出答案
+3. 如果知识库内容不完整或与问题不完全相关，请基于知识库内容尽力回答
+4. 不要添加任何知识库以外的信息
+5. 不要编造或假设任何知识库中没有的内容
+6. 只使用知识库中的答案，不要使用外部知识
+
+请基于知识库内容回答用户问题。"""
+
+    def generate_optimized():
         yield "data: {\"type\":\"start\"}\n\n"
 
-        # 尝试调用LLM API（LLM内部会分析问题+检索+生成答案）
-        llm_answer = get_llm_response_stream_v2(query, context, matches)
+        global client
+        if not client and OPENAI_SDK_AVAILABLE and API_KEY:
+            try:
+                client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
+            except:
+                pass
 
-        if llm_answer:
-            has_content = False
-            for chunk in llm_answer:
-                if chunk:
-                    has_content = True
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+        if not client:
+            # LLM不可用，直接返回最佳答案
+            best_answer = high_matches[0][1] if high_matches else (merged_matches[0][1] if merged_matches else '抱歉，服务暂时不可用。')
+            for chunk in best_answer['问题处理结果'] if isinstance(best_answer, dict) else best_answer:
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
+            return
 
-            if has_content:
-                yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
-            else:
-                # LLM返回空内容，使用知识库回复
-                answer = polite_response(best_match['问题处理结果'], query)
-                yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
-        else:
-            # LLM失败时使用知识库回复
-            answer = polite_response(best_match['问题处理结果'], query)
-            yield f"data: {json.dumps({'type': 'chunk', 'content': answer})}\n\n"
+        try:
+            stream = client.chat.completions.create(
+                model=MODEL,
+                messages=[
+                    {'role': 'system', 'content': '你是雷池WAF技术支持专家，严格基于知识库内容回答问题。如果知识库没有相关内容，必须如实告知用户，绝不编造信息。'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                max_tokens=600,
+                temperature=0.5,
+                stream=True
+            )
+
+            # 流式输出并缓存
+            answer_chunks = []
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    content = chunk.choices[0].delta.content
+                    answer_chunks.append(content)
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+
+            # 缓存答案
+            save_to_cache(query, answer_chunks, llm_used=True)
+
+            # 保存助手回复到对话历史
+            bot_response = ''.join(answer_chunks)
+            add_to_conversation(session_id, 'assistant', bot_response)
+
+            yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
+
+        except Exception as e:
+            print(f"LLM API调用失败: {e}")
+            import traceback
+            traceback.print_exc()
+            # 返回知识库答案作为后备
+            fallback_match = high_matches[0][1] if high_matches else (merged_matches[0][1] if merged_matches else None)
+            fallback_answer = fallback_match.get('问题处理结果', '抱歉，服务暂时不可用，请稍后重试。') if fallback_match else '抱歉，服务暂时不可用。'
+            for chunk in fallback_answer:
+                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
             yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
 
-    return Response(generate(), mimetype='text/event-stream', headers={
+    return Response(generate_optimized(), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no'
@@ -706,7 +868,34 @@ def health():
     """健康检查"""
     return jsonify({
         'status': 'ok',
-        'knowledge_count': len(KNOWLEDGE)
+        'knowledge_count': len(KNOWLEDGE),
+        'cache_size': len(QUERY_CACHE),
+        'embedding_cache_size': len(KNOWLEDGE_EMBEDDINGS)
+    })
+
+@app.route('/api/cache/clear', methods=['POST'])
+def clear_query_cache():
+    """清空查询缓存"""
+    clear_cache()
+    return jsonify({'status': 'ok', 'message': '缓存已清空'})
+
+@app.route('/api/conversation/clear', methods=['POST'])
+def clear_api_conversation():
+    """清空对话历史（通过API）"""
+    data = request.get_json()
+    session_id = data.get('session_id', DEFAULT_SESSION_ID)
+    clear_conversation(session_id)
+    return jsonify({'status': 'ok', 'message': f'会话 {session_id} 历史已清空'})
+
+@app.route('/api/conversation', methods=['GET'])
+def get_api_conversation():
+    """获取对话历史"""
+    data = request.get_json() or {}
+    session_id = data.get('session_id', DEFAULT_SESSION_ID)
+    history = get_conversation_context(session_id, max_turns=10)
+    return jsonify({
+        'session_id': session_id,
+        'history': history
     })
 
 @app.route('/api/history', methods=['GET'])
@@ -720,8 +909,8 @@ def get_history():
 def save_chat():
     """保存单条聊天记录"""
     data = request.get_json()
-    user_message = data.get('user', '')
-    bot_message = data.get('bot', '')
+    user_message = data.get('user', '').strip()
+    bot_message = data.get('bot', '').strip()
 
     if user_message and bot_message:
         CHAT_HISTORY.append({
@@ -749,8 +938,8 @@ FEEDBACK_HISTORY = []
 def save_feedback():
     """保存用户反馈"""
     data = request.get_json()
-    user_message = data.get('user', '')
-    bot_message = data.get('bot', '')
+    user_message = data.get('user', '').strip()
+    bot_message = data.get('bot', '').strip()
     feedback_type = data.get('type', '')  # like 或 dislike
 
     if user_message and bot_message and feedback_type:
@@ -770,61 +959,16 @@ def save_feedback():
         # 持久化到本地文件
         save_feedback_to_file(FEEDBACK_HISTORY)
 
-        # 持久化到MySQL（如果可用）
-        if MYSQL_AVAILABLE:
-            try:
-                conn = get_db_connection()
-                with conn.cursor() as cursor:
-                    if feedback_type == 'dislike':
-                        cursor.execute(
-                            "INSERT INTO bad (user_question, bot_answer) VALUES (%s, %s)",
-                            (user_message, bot_message)
-                        )
-                    else:
-                        cursor.execute(
-                            "INSERT INTO good (user_question, bot_answer) VALUES (%s, %s)",
-                            (user_message, bot_message)
-                        )
-                conn.commit()
-                conn.close()
-            except Exception as e:
-                print(f"保存反馈到数据库失败: {e}")
-
     return jsonify({'status': 'ok'})
 
 @app.route('/api/feedback', methods=['GET'])
 def get_feedback():
     """获取用户反馈历史"""
-    # 从MySQL获取数据
-    feedback_list = []
-    try:
-        conn = get_db_connection()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            # 获取贬低数据
-            cursor.execute("SELECT user_question, bot_answer, created_at FROM bad ORDER BY created_at DESC")
-            bad_data = cursor.fetchall()
-            for item in bad_data:
-                feedback_list.append({
-                    'user': item['user_question'],
-                    'bot': item['bot_answer'],
-                    'type': 'dislike',
-                    'time': item['created_at'].strftime('%Y-%m-%d %H:%M:%S')
-                })
-            # 获取点赞数据
-            cursor.execute("SELECT user_question, bot_answer, created_at FROM good ORDER BY created_at DESC")
-            good_data = cursor.fetchall()
-            for item in good_data:
-                feedback_list.append({
-                    'user': item['user_question'],
-                    'bot': item['bot_answer'],
-                    'type': 'like',
-                    'time': item['created_at'].strftime('%Y-%m-%d %H:%M:%S')
-                })
-        conn.close()
-    except Exception as e:
-        print(f"从数据库获取反馈失败: {e}")
-        # 如果数据库获取失败，返回内存数据
-        feedback_list = FEEDBACK_HISTORY
+    # 从本地文件获取数据
+    feedback_list = [
+        {**f, 'id': f"local_{i}"}
+        for i, f in enumerate(load_feedback_from_file())
+    ]
 
     # 按时间倒序
     feedback_list.sort(key=lambda x: x['time'], reverse=True)
@@ -832,31 +976,111 @@ def get_feedback():
         'feedback': feedback_list
     })
 
-@app.route('/api/feedback/dislike', methods=['GET'])
-def get_dislike_feedback():
-    """获取贬低反馈"""
-    # 从MySQL获取贬低数据
-    dislikes = []
-    try:
-        conn = get_db_connection()
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute("SELECT user_question, bot_answer, created_at FROM bad ORDER BY created_at DESC")
-            bad_data = cursor.fetchall()
-            for item in bad_data:
-                dislikes.append({
-                    'user': item['user_question'],
-                    'bot': item['bot_answer'],
-                    'type': 'dislike',
-                    'time': item['created_at'].strftime('%Y-%m-%d %H:%M:%S')
-                })
-        conn.close()
-    except Exception as e:
-        print(f"从数据库获取贬低反馈失败: {e}")
-        dislikes = [f for f in FEEDBACK_HISTORY if f.get('type') == 'dislike']
+@app.route('/api/feedback/<feedback_id>', methods=['PUT'])
+def update_feedback(feedback_id):
+    """更新反馈内容"""
+    data = request.get_json()
+    user_message = data.get('user', '').strip()
+    bot_message = data.get('bot', '').strip()
+    knowledge_id = data.get('knowledgeId', '')  # 获取关联的knowledgeId
 
-    return jsonify({
-        'dislikes': dislikes
-    })
+    if not user_message or not bot_message:
+        return jsonify({'success': False, 'message': '用户问题和机器人回复不能为空'}), 400
+
+    try:
+        # 解析ID格式: local_0
+        if '_' in feedback_id:
+            table_type, db_id = feedback_id.split('_', 1)
+
+            if table_type == 'local':
+                # 更新本地文件
+                index = int(db_id)
+                if 0 <= index < len(FEEDBACK_HISTORY):
+                    FEEDBACK_HISTORY[index]['user'] = user_message
+                    FEEDBACK_HISTORY[index]['bot'] = bot_message
+                    # 如果有关联knowledgeId，添加标记
+                    if knowledge_id:
+                        FEEDBACK_HISTORY[index]['knowledgeId'] = knowledge_id
+                        FEEDBACK_HISTORY[index]['update_time'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    save_feedback_to_file(FEEDBACK_HISTORY)
+                    return jsonify({'success': True, 'message': '更新成功'})
+        return jsonify({'success': False, 'message': '找不到对应的反馈'}), 404
+    except Exception as e:
+        print(f"更新反馈失败: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/feedback/<feedback_id>', methods=['DELETE'])
+def delete_feedback(feedback_id):
+    """删除反馈"""
+    try:
+        # 解析ID格式: local_0
+        if '_' in feedback_id:
+            table_type, db_id = feedback_id.split('_', 1)
+
+            if table_type == 'local':
+                # 从本地文件删除
+                index = int(db_id)
+                if 0 <= index < len(FEEDBACK_HISTORY):
+                    del FEEDBACK_HISTORY[index]
+                    save_feedback_to_file(FEEDBACK_HISTORY)
+                    return jsonify({'success': True, 'message': '删除成功'})
+        return jsonify({'success': False, 'message': '找不到对应的反馈'}), 404
+    except Exception as e:
+        print(f"删除反馈失败: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/feedback/search', methods=['GET'])
+def search_feedback():
+    """搜索反馈"""
+    keyword = request.args.get('keyword', '').strip()
+    feedback_type = request.args.get('type', '')  # like, dislike, 或空表示全部
+
+    if not keyword:
+        return jsonify({'feedback': [], 'message': '搜索关键词不能为空'}), 400
+
+    # 从本地文件搜索
+    feedback_list = [
+        {**f, 'id': f"local_{i}"}
+        for i, f in enumerate(FEEDBACK_HISTORY)
+        if keyword in f.get('user', '') or keyword in f.get('bot', '')
+    ]
+    if feedback_type:
+        feedback_list = [f for f in feedback_list if f.get('type') == feedback_type]
+
+    # 按时间倒序
+    feedback_list.sort(key=lambda x: x['time'], reverse=True)
+    return jsonify({'feedback': feedback_list})
+
+@app.route('/api/feedback/manual', methods=['POST'])
+def add_feedback_manual():
+    """手动添加反馈"""
+    data = request.get_json()
+    user_message = data.get('user', '').strip()
+    bot_message = data.get('bot', '').strip()
+    feedback_type = data.get('type', 'dislike')  # like 或 dislike
+
+    if not user_message or not bot_message:
+        return jsonify({'success': False, 'message': '用户问题和机器人回复不能为空'}), 400
+
+    if feedback_type not in ['like', 'dislike']:
+        feedback_type = 'dislike'
+
+    feedback_item = {
+        'user': user_message,
+        'bot': bot_message,
+        'type': feedback_type,
+        'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+
+    # 添加到内存
+    FEEDBACK_HISTORY.append(feedback_item)
+    if len(FEEDBACK_HISTORY) > 100:
+        FEEDBACK_HISTORY[:] = FEEDBACK_HISTORY[-100:]
+
+    # 持久化到本地文件
+    save_feedback_to_file(FEEDBACK_HISTORY)
+
+    return jsonify({'success': True, 'message': '添加成功', 'data': feedback_item})
 
 # 钉钉机器人配置
 DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=c3f5f59702be9aa1237d1ce50e857823ffd66d85c661741215195eab47ea5509"
@@ -1052,18 +1276,30 @@ def chat_with_image():
                 for i, (score, match) in enumerate(matches[:3], 1):
                     context_parts.append(f"参考{i}：\n问题：{match['问题描述']}\n解答：{match['问题处理结果']}\n\n")
                 context = "".join(context_parts)
-                prompt = f"图片识别结果：{vision_result}\n\n{context}\n\n用户问题：{query if query else '请根据图片内容回答'}\n\n请根据图片识别结果和知识库内容给出专业回答。"
+                prompt = f"""图片识别结果：{vision_result}
+
+{context}
+
+用户问题：{query if query else '请根据图片内容回答'}
+
+重要规则：
+1. 严格基于知识库内容回答
+2. 如果知识库没有相关内容，明确说明"知识库中没有找到相关内容"
+3. 不要添加任何知识库以外的信息
+4. 只使用知识库中提供的信息
+
+请基于知识库内容回答用户问题。"""
             else:
-                prompt = f"图片识别结果：{vision_result}\n\n用户问题：{query if query else '请描述图片内容'}\n\n请根据图片内容直接回答。"
+                prompt = f"图片识别结果：{vision_result}\n\n用户问题：{query if query else '请描述图片内容'}\n\n说明：知识库中没有找到相关内容，只能基于图片识别结果回复。"
 
             stream = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {'role': 'system', 'content': '你是雷池WAF高级技术支持专家，回答专业、准确、礼貌。'},
+                    {'role': 'system', 'content': '你是雷池WAF技术支持专家，严格基于知识库内容回答问题。如果知识库没有相关内容，必须如实告知用户，绝不编造信息。'},
                     {'role': 'user', 'content': prompt}
                 ],
                 max_tokens=500,
-                temperature=0.7,
+                temperature=0.5,
                 stream=True
             )
 
@@ -1104,6 +1340,7 @@ def chat_with_image():
 
 if __name__ == '__main__':
     print(f"知识库已加载，共 {len(KNOWLEDGE)} 条问答")
-    # 预计算知识库embedding
-    get_embeddings_for_knowledge()
+    # 暂时禁用预计算embedding，加快启动速度
+    # get_embeddings_for_knowledge()
+    print("服务启动中...")
     app.run(host='0.0.0.0', port=5000, debug=True)

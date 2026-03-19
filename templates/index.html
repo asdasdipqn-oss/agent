@@ -112,6 +112,23 @@
             animation: pulse 2s infinite;
         }
 
+        .clear-btn {
+            margin-left: 12px;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .clear-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: rotate(180deg);
+        }
+
         @keyframes pulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
@@ -682,6 +699,7 @@
                 <span class="status-dot"></span>
                 <span id="knowledge-count">加载中...</span>
             </div>
+            <button class="clear-btn" onclick="clearConversation()" title="清空对话">🔄</button>
         </div>
 
         <div class="chat-container" id="chat-container">
@@ -732,6 +750,9 @@
     </div>
 
     <script>
+        // 会话 ID（用于多轮对话上下文）
+        const sessionId = 'session_' + Date.now();
+
         const chatContainer = document.getElementById('chat-container');
 
         // 初始化欢迎页面的Lottie动画
@@ -845,6 +866,32 @@
             const now = new Date();
             return now.getHours().toString().padStart(2, '0') + ':' +
                    now.getMinutes().toString().padStart(2, '0');
+        }
+
+        // 清空对话
+        async function clearConversation() {
+            if (!confirm('确定要清空对话历史吗？')) return;
+
+            try {
+                await fetch('/api/conversation/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId })
+                });
+
+                // 清空界面上的消息
+                const messages = document.querySelectorAll('.message');
+                messages.forEach(msg => msg.remove());
+
+                // 显示欢迎消息
+                const welcomeMessage = document.getElementById('welcome-message');
+                if (welcomeMessage) welcomeMessage.style.display = 'block';
+
+                console.log('对话历史已清空');
+            } catch (err) {
+                console.error('清空对话失败:', err);
+                alert('清空对话失败，请重试');
+            }
         }
 
         function createMessageElement(content, isUser, time, sources = [], matchedQuestion = null, llmUsed = false) {
@@ -1049,10 +1096,11 @@
                     requestBody = {
                         message: queryMessage,
                         image: selectedImageBase64,
-                        ocrText: ocrResult
+                        ocrText: ocrResult,
+                        session_id: sessionId
                     };
                 } else {
-                    requestBody = { message };
+                    requestBody = { message, session_id: sessionId };
                 }
 
                 const response = await fetch(apiEndpoint, {

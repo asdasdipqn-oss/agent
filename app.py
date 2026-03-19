@@ -5,10 +5,112 @@
 """
 import json
 import os
+import pymysql
 from flask import Flask, request, jsonify, render_template, Response, stream_with_context
 from flask_cors import CORS
 import re
 from datetime import datetime
+
+# MySQL 数据库配置
+DB_CONFIG = {
+    'host': os.environ.get('DB_HOST', 'localhost'),
+    'port': int(os.environ.get('DB_PORT', 3306)),
+    'user': os.environ.get('DB_USER', 'root'),
+    'password': os.environ.get('DB_PASSWORD', '123456'),
+    'database': os.environ.get('DB_NAME', 'waf_agent'),
+    'charset': 'utf8mb4'
+}
+
+# 本地文件存储路径
+FEEDBACK_FILE = os.path.join(os.path.dirname(__file__), 'feedback_data.json')
+
+# MySQL连接状态
+MYSQL_AVAILABLE = False
+
+# 初始化数据库表
+def init_db():
+    """初始化数据库和表"""
+    global MYSQL_AVAILABLE
+    try:
+        # 连接数据库
+        conn = pymysql.connect(
+            host=DB_CONFIG['host'],
+            port=DB_CONFIG['port'],
+            user=DB_CONFIG['user'],
+            password=DB_CONFIG['password'],
+            charset=DB_CONFIG['charset'],
+            connect_timeout=5
+        )
+        with conn.cursor() as cursor:
+            # 创建数据库
+            cursor.execute(f"CREATE DATABASE IF NOT EXISTS {DB_CONFIG['database']}")
+            cursor.execute(f"USE {DB_CONFIG['database']}")
+
+            # 创建贬低表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS bad (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_question TEXT NOT NULL,
+                    bot_answer TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+
+            # 创建点赞表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS good (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user_question TEXT NOT NULL,
+                    bot_answer TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_created_at (created_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """)
+
+        conn.commit()
+        conn.close()
+        MYSQL_AVAILABLE = True
+        print("数据库初始化成功")
+    except Exception as e:
+        print(f"数据库初始化失败: {e}")
+        MYSQL_AVAILABLE = False
+
+# 初始化数据库
+init_db()
+
+# 本地文件存储函数
+def load_feedback_from_file():
+    """从本地文件加载反馈数据"""
+    if os.path.exists(FEEDBACK_FILE):
+        try:
+            with open(FEEDBACK_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except:
+            return []
+    return []
+
+def save_feedback_to_file(feedback_list):
+    """保存反馈到本地文件"""
+    try:
+        with open(FEEDBACK_FILE, 'w', encoding='utf-8') as f:
+            json.dump(feedback_list, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"保存反馈到文件失败: {e}")
+
+# 加载本地反馈数据
+FEEDBACK_HISTORY = load_feedback_from_file()
+
+# 获取数据库连接
+def get_db_connection():
+    return pymysql.connect(
+        host=DB_CONFIG['host'],
+        port=DB_CONFIG['port'],
+        user=DB_CONFIG['user'],
+        password=DB_CONFIG['password'],
+        database=DB_CONFIG['database'],
+        charset=DB_CONFIG['charset']
+    )
 
 # 使用OpenAI SDK (兼容SiliconFlow API)
 try:
@@ -442,6 +544,37 @@ def index():
     """渲染主页"""
     return render_template('index.html')
 
+@app.route('/feedback')
+def feedback():
+    """渲染反馈管理页面"""
+    return render_template('feedback.html')
+
+@app.route('/api/knowledge/add', methods=['POST'])
+def add_to_knowledge():
+    """添加新条目到知识库"""
+    data = request.get_json()
+    question = data.get('question', '').strip()
+    answer = data.get('answer', '').strip()
+
+    if not question or not answer:
+        return jsonify({'success': False, 'message': '问题和答案不能为空'}), 400
+
+    # 添加到知识库
+    KNOWLEDGE.append({
+        '问题描述': question,
+        '问题处理结果': answer
+    })
+
+    # 保存到文件
+    try:
+        with open(KNOWLEDGE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(KNOWLEDGE, f, ensure_ascii=False, indent=2)
+        return jsonify({'success': True, 'message': '添加成功'})
+    except Exception as e:
+        # 回滚内存中的数据
+        KNOWLEDGE.pop()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @app.route('/api/chat', methods=['POST'])
 def chat():
     """问答接口 - 流式输出"""
@@ -608,6 +741,122 @@ def clear_history():
     global CHAT_HISTORY
     CHAT_HISTORY = []
     return jsonify({'status': 'ok'})
+
+# 用户反馈存储
+FEEDBACK_HISTORY = []
+
+@app.route('/api/feedback', methods=['POST'])
+def save_feedback():
+    """保存用户反馈"""
+    data = request.get_json()
+    user_message = data.get('user', '')
+    bot_message = data.get('bot', '')
+    feedback_type = data.get('type', '')  # like 或 dislike
+
+    if user_message and bot_message and feedback_type:
+        feedback_item = {
+            'user': user_message,
+            'bot': bot_message,
+            'type': feedback_type,
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+
+        # 添加到内存
+        FEEDBACK_HISTORY.append(feedback_item)
+        # 只保留最近100条
+        if len(FEEDBACK_HISTORY) > 100:
+            FEEDBACK_HISTORY[:] = FEEDBACK_HISTORY[-100:]
+
+        # 持久化到本地文件
+        save_feedback_to_file(FEEDBACK_HISTORY)
+
+        # 持久化到MySQL（如果可用）
+        if MYSQL_AVAILABLE:
+            try:
+                conn = get_db_connection()
+                with conn.cursor() as cursor:
+                    if feedback_type == 'dislike':
+                        cursor.execute(
+                            "INSERT INTO bad (user_question, bot_answer) VALUES (%s, %s)",
+                            (user_message, bot_message)
+                        )
+                    else:
+                        cursor.execute(
+                            "INSERT INTO good (user_question, bot_answer) VALUES (%s, %s)",
+                            (user_message, bot_message)
+                        )
+                conn.commit()
+                conn.close()
+            except Exception as e:
+                print(f"保存反馈到数据库失败: {e}")
+
+    return jsonify({'status': 'ok'})
+
+@app.route('/api/feedback', methods=['GET'])
+def get_feedback():
+    """获取用户反馈历史"""
+    # 从MySQL获取数据
+    feedback_list = []
+    try:
+        conn = get_db_connection()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            # 获取贬低数据
+            cursor.execute("SELECT user_question, bot_answer, created_at FROM bad ORDER BY created_at DESC")
+            bad_data = cursor.fetchall()
+            for item in bad_data:
+                feedback_list.append({
+                    'user': item['user_question'],
+                    'bot': item['bot_answer'],
+                    'type': 'dislike',
+                    'time': item['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+                })
+            # 获取点赞数据
+            cursor.execute("SELECT user_question, bot_answer, created_at FROM good ORDER BY created_at DESC")
+            good_data = cursor.fetchall()
+            for item in good_data:
+                feedback_list.append({
+                    'user': item['user_question'],
+                    'bot': item['bot_answer'],
+                    'type': 'like',
+                    'time': item['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+                })
+        conn.close()
+    except Exception as e:
+        print(f"从数据库获取反馈失败: {e}")
+        # 如果数据库获取失败，返回内存数据
+        feedback_list = FEEDBACK_HISTORY
+
+    # 按时间倒序
+    feedback_list.sort(key=lambda x: x['time'], reverse=True)
+    return jsonify({
+        'feedback': feedback_list
+    })
+
+@app.route('/api/feedback/dislike', methods=['GET'])
+def get_dislike_feedback():
+    """获取贬低反馈"""
+    # 从MySQL获取贬低数据
+    dislikes = []
+    try:
+        conn = get_db_connection()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("SELECT user_question, bot_answer, created_at FROM bad ORDER BY created_at DESC")
+            bad_data = cursor.fetchall()
+            for item in bad_data:
+                dislikes.append({
+                    'user': item['user_question'],
+                    'bot': item['bot_answer'],
+                    'type': 'dislike',
+                    'time': item['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+                })
+        conn.close()
+    except Exception as e:
+        print(f"从数据库获取贬低反馈失败: {e}")
+        dislikes = [f for f in FEEDBACK_HISTORY if f.get('type') == 'dislike']
+
+    return jsonify({
+        'dislikes': dislikes
+    })
 
 # 钉钉机器人配置
 DINGTALK_WEBHOOK = "https://oapi.dingtalk.com/robot/send?access_token=c3f5f59702be9aa1237d1ce50e857823ffd66d85c661741215195eab47ea5509"

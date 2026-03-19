@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>反馈管理 - 雷池智能问答助手</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --primary-dark: #2563eb;
+            --bg-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --glass-bg: rgba(255, 255, 255, 0.95);
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: var(--glass-bg);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .header {
+            padding: 20px 30px;
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .header h1 {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .header .back-btn {
+            padding: 8px 16px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+        }
+
+        .header .back-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            padding: 20px 30px;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .stat-item {
+            padding: 15px 25px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .stat-item .count {
+            font-size: 28px;
+            font-weight: 700;
+            color: #3b82f6;
+        }
+
+        .stat-item .label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 4px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: #1f2937;
+        }
+
+        .feedback-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .feedback-item {
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s ease;
+        }
+
+        .feedback-item:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .feedback-item.dislike {
+            border-left: 4px solid #ef4444;
+        }
+
+        .feedback-item.like {
+            border-left: 4px solid #10b981;
+        }
+
+        .feedback-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .feedback-type {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .feedback-type.dislike {
+            background: #fef2f2;
+            color: #dc2626;
+        }
+
+        .feedback-type.like {
+            background: #ecfdf5;
+            color: #059669;
+        }
+
+        .feedback-time {
+            font-size: 12px;
+            color: #9ca3af;
+        }
+
+        .feedback-content {
+            margin-bottom: 15px;
+        }
+
+        .feedback-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+
+        .feedback-text {
+            font-size: 14px;
+            color: #1f2937;
+            line-height: 1.6;
+        }
+
+        .feedback-text.user {
+            background: #eff6ff;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+
+        .feedback-text.bot {
+            background: #f3f4f6;
+            padding: 10px 14px;
+            border-radius: 8px;
+        }
+
+        .edit-area {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px dashed #e5e7eb;
+        }
+
+        .edit-area textarea {
+            width: 100%;
+            min-height: 80px;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            font-family: inherit;
+            resize: vertical;
+            margin-bottom: 10px;
+        }
+
+        .edit-area textarea:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .edit-area textarea.question-edit {
+            min-height: 60px;
+        }
+
+        .edit-area textarea.answer-edit {
+            min-height: 100px;
+        }
+
+        .edit-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+
+        .btn-secondary {
+            background: #e5e7eb;
+            color: #6b7280;
+        }
+
+        .btn-secondary:hover {
+            background: #d1d5db;
+        }
+
+        .btn-success {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: #059669;
+        }
+
+        .success-message {
+            display: none;
+            color: #10b981;
+            font-size: 13px;
+            margin-left: 10px;
+            align-items: center;
+        }
+
+        .success-message.show {
+            display: flex;
+        }
+
+        /* 折叠样式 */
+        .feedback-item {
+            cursor: pointer;
+        }
+
+        .feedback-item .summary {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .feedback-item .summary-content {
+            flex: 1;
+        }
+
+        .feedback-item .summary-user {
+            font-size: 14px;
+            color: #1f2937;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 600px;
+        }
+
+        .feedback-item .expand-icon {
+            font-size: 12px;
+            color: #9ca3af;
+            transition: transform 0.2s ease;
+        }
+
+        .feedback-item.expanded .expand-icon {
+            transform: rotate(180deg);
+        }
+
+        .feedback-item .detail-content {
+            display: none;
+            margin-top: 15px;
+        }
+
+        .feedback-item.expanded .detail-content {
+            display: block;
+        }
+
+        .feedback-item .feedback-content {
+            display: none;
+        }
+
+        .feedback-item.expanded .feedback-content {
+            display: block;
+        }
+
+        .feedback-item .edit-area {
+            display: none;
+        }
+
+        .feedback-item.expanded .edit-area {
+            display: block;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #9ca3af;
+        }
+
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6b7280;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            padding: 12px 24px;
+            background: #1f2937;
+            color: white;
+            border-radius: 8px;
+            font-size: 14px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .toast.success {
+            background: #10b981;
+        }
+
+        .toast.error {
+            background: #ef4444;
+        }
+
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid #e5e7eb;
+            background: white;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .filter-btn.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 反馈管理</h1>
+            <a href="/" class="back-btn">← 返回问答</a>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="count" id="total-count">0</div>
+                <div class="label">总反馈数</div>
+            </div>
+            <div class="stat-item">
+                <div class="count" id="dislike-count">0</div>
+                <div class="label">贬低反馈</div>
+            </div>
+            <div class="stat-item">
+                <div class="count" id="like-count">0</div>
+                <div class="label">点赞反馈</div>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="filter-bar">
+                <button class="filter-btn active" onclick="filterFeedback('all')">全部</button>
+                <button class="filter-btn" onclick="filterFeedback('dislike')">只看贬低</button>
+                <button class="filter-btn" onclick="filterFeedback('like')">只看点赞</button>
+            </div>
+
+            <h2 class="section-title">反馈列表</h2>
+            <div class="feedback-list" id="feedback-list">
+                <div class="loading">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let allFeedback = [];
+
+        // 加载反馈数据
+        async function loadFeedback() {
+            try {
+                const response = await fetch('/api/feedback');
+                const data = await response.json();
+                allFeedback = data.feedback || [];
+                renderFeedback(allFeedback);
+                updateStats();
+            } catch (err) {
+                console.error('加载反馈失败:', err);
+                document.getElementById('feedback-list').innerHTML = '<div class="empty-state">加载失败，请刷新页面</div>';
+            }
+        }
+
+        // 更新统计
+        function updateStats() {
+            document.getElementById('total-count').textContent = allFeedback.length;
+            document.getElementById('dislike-count').textContent = allFeedback.filter(f => f.type === 'dislike').length;
+            document.getElementById('like-count').textContent = allFeedback.filter(f => f.type === 'like').length;
+        }
+
+        // 过滤反馈
+        function filterFeedback(type) {
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+
+            if (type === 'all') {
+                renderFeedback(allFeedback);
+            } else {
+                const filtered = allFeedback.filter(f => f.type === type);
+                renderFeedback(filtered);
+            }
+        }
+
+        // 渲染反馈列表
+        function renderFeedback(feedbackList) {
+            const container = document.getElementById('feedback-list');
+
+            if (feedbackList.length === 0) {
+                container.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div>暂无反馈数据</div></div>';
+                return;
+            }
+
+            container.innerHTML = feedbackList.map((item, index) => `
+                <div class="feedback-item ${item.type}" data-index="${index}">
+                    <div class="summary" onclick="toggleExpand(event, this)">
+                        <span class="feedback-type ${item.type}">
+                            ${item.type === 'like' ? '👍' : '👎'}
+                        </span>
+                        <div class="summary-content">
+                            <div class="summary-user">${escapeHtml(item.user)}</div>
+                        </div>
+                        <span class="feedback-time">${item.time}</span>
+                        <span class="expand-icon">▼</span>
+                    </div>
+
+                    <div class="detail-content">
+                        <div class="feedback-content">
+                            <div class="feedback-label">用户问题：</div>
+                            <div class="feedback-text user">${escapeHtml(item.user)}</div>
+
+                            <div class="feedback-label" style="margin-top: 12px;">机器人回复：</div>
+                            <div class="feedback-text bot">${escapeHtml(item.bot)}</div>
+                        </div>
+
+                        <div class="edit-area">
+                            <div class="feedback-label">问题描述（可编辑）：</div>
+                            <textarea class="question-edit" id="question-${index}">${escapeHtml(item.user)}</textarea>
+
+                            <div class="feedback-label">问题处理结果（可编辑）：</div>
+                            <textarea class="answer-edit" id="answer-${index}">${escapeHtml(item.bot)}</textarea>
+
+                            <div class="edit-actions">
+                                <button class="btn btn-success" onclick="event.stopPropagation(); addToKnowledge(${index})">添加到知识库</button>
+                                <span class="success-message" id="success-${index}">✓ 添加成功</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 切换展开/折叠
+        function toggleExpand(event, element) {
+            // 点击标题区域，切换展开/收起状态
+            const parent = element.closest('.feedback-item');
+            if (parent) {
+                parent.classList.toggle('expanded');
+            }
+        }
+
+        // 转义HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 添加到知识库
+        async function addToKnowledge(index) {
+            const question = document.getElementById(`question-${index}`).value.trim();
+            const answer = document.getElementById(`answer-${index}`).value.trim();
+
+            if (!question || !answer) {
+                showToast('问题和答案不能为空', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/knowledge/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: question,
+                        answer: answer
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('添加成功！', 'success');
+                    const successEl = document.getElementById(`success-${index}`);
+                    successEl.classList.add('show');
+                    setTimeout(() => {
+                        successEl.classList.remove('show');
+                    }, 3000);
+                } else {
+                    showToast(data.message || '添加失败', 'error');
+                }
+            } catch (err) {
+                console.error('添加失败:', err);
+                showToast('添加失败，请重试', 'error');
+            }
+        }
+
+        // 显示提示
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // 页面加载
+        loadFeedback();
+    </script>
+</body>
+</html>

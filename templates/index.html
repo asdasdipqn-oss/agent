@@ -892,6 +892,33 @@
                 btn.classList.add(type === 'like' ? 'liked' : 'disliked');
                 // 播放Lottie动画
                 playFeedbackAnimation(parent, type);
+
+                // 获取用户问题和机器人回复
+                const botMsgDiv = parent.closest('.message.bot');
+                if (botMsgDiv) {
+                    const botMessage = botMsgDiv.querySelector('.message-bubble').textContent;
+                    // 找到前面的用户消息
+                    const allMessages = Array.from(chatContainer.querySelectorAll('.message.user'));
+                    let userMessage = '';
+                    // 找到最后一个用户消息
+                    if (allMessages.length > 0) {
+                        const lastUserMsg = allMessages[allMessages.length - 1];
+                        userMessage = lastUserMsg.querySelector('.message-bubble').textContent;
+                    }
+
+                    // 发送反馈到后端
+                    if (userMessage && botMessage) {
+                        fetch('/api/feedback', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                user: userMessage,
+                                bot: botMessage,
+                                type: type
+                            })
+                        }).catch(err => console.error('反馈保存失败:', err));
+                    }
+                }
             } else {
                 btn.classList.remove(type === 'like' ? 'liked' : 'disliked');
             }

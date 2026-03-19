@@ -1,0 +1,1646 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>反馈管理 - 雷池智能问答助手</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lottie-web/5.12.2/lottie.min.js"></script>
+    <style>
+        :root {
+            --primary-color: #6366f1;
+            --primary-dark: #4f46e5;
+            --primary-light: #818cf8;
+            --secondary-color: #8b5cf6;
+            --accent-pink: #ec4899;
+            --accent-cyan: #06b6d4;
+            --bg-gradient-1: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+            --bg-gradient-2: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --glass-bg: rgba(255, 255, 255, 0.92);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.08);
+            --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.12);
+            --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.15);
+            --danger-color: #ef4444;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-gradient-1);
+            background-size: 400% 400%;
+            animation: gradientShift 15s ease infinite;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        @keyframes gradientShift {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* 背景装饰 */
+        .bg-decoration {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 0;
+        }
+
+        .bg-decoration::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+                        radial-gradient(circle at 40% 40%, rgba(120, 219, 255, 0.2) 0%, transparent 40%);
+            animation: float 20s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translate(0, 0) rotate(0deg); }
+            33% { transform: translate(30px, -30px) rotate(5deg); }
+            66% { transform: translate(-20px, 20px) rotate(-5deg); }
+        }
+
+        .container {
+            position: relative;
+            max-width: 1300px;
+            margin: 0 auto;
+            background: var(--glass-bg);
+            border-radius: 32px;
+            box-shadow: var(--shadow-lg);
+            overflow: hidden;
+            backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            animation: slideUp 0.6s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .header {
+            padding: 28px 40px;
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #4338ca 100%);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 400px;
+            height: 400px;
+            background: radial-gradient(circle, rgba(139, 92, 246, 0.3) 0%, transparent 70%);
+            animation: pulse 4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); opacity: 0.5; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+        }
+
+        .header-content {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            z-index: 1;
+        }
+
+        .header-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--accent-pink), var(--accent-cyan));
+            border-radius: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+            animation: iconFloat 3s ease-in-out infinite;
+        }
+
+        @keyframes iconFloat {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50% { transform: translateY(-5px) rotate(5deg); }
+        }
+
+        .header h1 {
+            font-size: 26px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #fff 0%, #e0e7ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.5px;
+        }
+
+        .back-btn {
+            padding: 12px 24px;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 12px;
+            color: white;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            z-index: 1;
+        }
+
+        .back-btn:hover {
+            background: rgba(255, 255, 255, 0.25);
+            transform: translateX(-4px);
+            box-shadow: 0 4px 16px rgba(255, 255, 255, 0.2);
+        }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+            padding: 30px 40px;
+            background: linear-gradient(180deg, rgba(248, 250, 252, 0.8) 0%, rgba(255, 255, 255, 1) 100%);
+            border-bottom: 1px solid rgba(229, 231, 235, 0.6);
+            position: relative;
+        }
+
+        .stat-item {
+            flex: 1;
+            padding: 24px 28px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid rgba(229, 231, 235, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, var(--primary-color), var(--secondary-color));
+            transform: scaleX(0);
+            transition: transform 0.3s ease;
+        }
+
+        .stat-item:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .stat-item:hover::before {
+            transform: scaleX(1);
+        }
+
+        .stat-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            flex-shrink: 0;
+        }
+
+        .stat-icon.total {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+        }
+
+        .stat-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 26px;
+            flex-shrink: 0;
+        }
+
+        .stat-icon.total {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+        }
+
+        .stat-icon.dislike {
+            background: linear-gradient(135deg, #f87171, #ef4444);
+            box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+        }
+
+        .stat-icon.like {
+            background: linear-gradient(135deg, #34d399, #10b981);
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.3);
+        }
+
+        .stat-icon.updated {
+            background: linear-gradient(135deg, #8b5cf6, #6366f1);
+            box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
+        }
+
+        .stat-content {
+            flex: 1;
+        }
+
+        .stat-item .count {
+            font-size: 36px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #1e1b4b 0%, #4338ca 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+
+        .stat-item .label {
+            font-size: 13px;
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        .content {
+            padding: 35px 40px;
+        }
+
+        /* 工具栏 */
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 28px;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 320px;
+            position: relative;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 14px 50px 14px 20px;
+            border: 2px solid rgba(229, 231, 235, 0.6);
+            border-radius: 14px;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+        }
+
+        .search-box input:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+            background: white;
+        }
+
+        .search-box .search-icon {
+            position: absolute;
+            right: 18px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+            font-size: 18px;
+            transition: color 0.3s ease;
+        }
+
+        .search-box input:focus + .search-icon {
+            color: var(--primary-color);
+        }
+
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.6);
+            padding: 6px;
+            border-radius: 14px;
+            border: 1px solid rgba(229, 231, 235, 0.6);
+        }
+
+        .filter-btn {
+            padding: 10px 20px;
+            border: none;
+            background: transparent;
+            color: #64748b;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .filter-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--primary-color);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            border-radius: 10px;
+        }
+
+        .filter-btn:hover {
+            color: var(--primary-color);
+            background: rgba(99, 102, 241, 0.08);
+        }
+
+        .filter-btn.active {
+            color: white;
+        }
+
+        .filter-btn.active::before {
+            opacity: 1;
+        }
+
+        .filter-btn span {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .section-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: #1e1b4b;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: linear-gradient(180deg, var(--primary-color), var(--secondary-color));
+            border-radius: 2px;
+        }
+
+        .feedback-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+            gap: 20px;
+        }
+
+        .feedback-item {
+            background: white;
+            border: 1px solid rgba(229, 231, 235, 0.6);
+            border-radius: 20px;
+            padding: 24px;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            animation: fadeInUp 0.4s ease-out forwards;
+            opacity: 0;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .feedback-item:nth-child(1) { animation-delay: 0.05s; }
+        .feedback-item:nth-child(2) { animation-delay: 0.1s; }
+        .feedback-item:nth-child(3) { animation-delay: 0.15s; }
+        .feedback-item:nth-child(4) { animation-delay: 0.2s; }
+        .feedback-item:nth-child(5) { animation-delay: 0.25s; }
+        .feedback-item:nth-child(n+6) { animation-delay: 0.3s; }
+
+        .feedback-item:hover {
+            box-shadow: var(--shadow-md);
+            transform: translateY(-4px);
+            border-color: var(--primary-light);
+        }
+
+        .feedback-item::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+        }
+
+        .feedback-item.dislike::before {
+            background: linear-gradient(180deg, #f87171, #ef4444);
+        }
+
+        .feedback-item.like::before {
+            background: linear-gradient(180deg, #34d399, #10b981);
+        }
+
+        .feedback-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+            gap: 12px;
+        }
+
+        .feedback-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .feedback-type {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .feedback-type.dislike {
+            background: linear-gradient(135deg, #fef2f2, #fee2e2);
+            color: #dc2626;
+            box-shadow: 0 2px 8px rgba(239, 68, 68, 0.15);
+        }
+
+        .feedback-type.like {
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            color: #059669;
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.15);
+        }
+
+        .feedback-time {
+            font-size: 12px;
+            color: #94a3b8;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+            animation: badgePulse 2s ease-in-out infinite;
+        }
+
+        @keyframes badgePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .badge-updated {
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            color: #059669;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .feedback-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .btn-sm {
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 500;
+            border-radius: 10px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .btn-sm:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn-edit {
+            background: linear-gradient(135deg, #e0e7ff, #c7d2fe);
+            color: var(--primary-color);
+        }
+
+        .btn-edit:hover {
+            background: linear-gradient(135deg, #c7d2fe, #a5b4fc);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+        }
+
+        .btn-delete {
+            background: linear-gradient(135deg, #fef2f2, #fee2e2);
+            color: var(--danger-color);
+        }
+
+        .btn-delete:hover {
+            background: linear-gradient(135deg, #fee2e2, #fecaca);
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-add-kb {
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            color: var(--success-color);
+        }
+
+        .btn-add-kb:hover {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+        }
+
+        .feedback-content {
+            margin-bottom: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .feedback-content.collapsed {
+            display: none;
+        }
+
+        .feedback-content.expanded {
+            display: block;
+        }
+
+        .toggle-btn {
+            background: transparent;
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 8px;
+            padding: 6px 12px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--primary-color);
+            font-weight: 500;
+        }
+
+        .toggle-btn:hover {
+            background: rgba(99, 102, 241, 0.08);
+            border-color: var(--primary-color);
+        }
+
+        .toggle-btn .icon {
+            transition: transform 0.3s ease;
+            display: inline-block;
+        }
+
+        .toggle-btn.expanded .icon {
+            transform: rotate(180deg);
+        }
+
+        .feedback-preview {
+            font-size: 13px;
+            color: #64748b;
+            line-height: 1.6;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+            border-radius: 10px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .feedback-preview .icon {
+            font-size: 16px;
+        }
+
+        .feedback-preview-text {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .feedback-label {
+            font-size: 12px;
+            color: #64748b;
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .feedback-label::before {
+            content: '';
+            width: 6px;
+            height: 6px;
+            background: var(--primary-light);
+            border-radius: 50%;
+        }
+
+        .feedback-text {
+            font-size: 14px;
+            color: #334155;
+            line-height: 1.7;
+            padding: 14px 16px;
+            border-radius: 12px;
+            position: relative;
+        }
+
+        .feedback-text.user {
+            background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+            border-left: 3px solid var(--accent-cyan);
+        }
+
+        .feedback-text.bot {
+            background: linear-gradient(135deg, #faf5ff, #f3e8ff);
+            border-left: 3px solid var(--secondary-color);
+        }
+
+        /* 弹窗样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(30, 27, 75, 0.6);
+            backdrop-filter: blur(8px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 24px;
+            width: 90%;
+            max-width: 620px;
+            max-height: 90vh;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9) translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1) translateY(0);
+            }
+        }
+
+        .modal-header {
+            padding: 24px 30px;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-bottom: 1px solid rgba(229, 231, 235, 0.6);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h3 {
+            font-size: 20px;
+            font-weight: 700;
+            color: #1e1b4b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .modal-close {
+            width: 36px;
+            height: 36px;
+            background: rgba(229, 231, 235, 0.5);
+            border: none;
+            border-radius: 10px;
+            font-size: 20px;
+            color: #64748b;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            background: var(--danger-color);
+            color: white;
+            transform: rotate(90deg);
+        }
+
+        .modal-body {
+            padding: 30px;
+            max-height: calc(90vh - 180px);
+            overflow-y: auto;
+        }
+
+        .modal-footer {
+            padding: 20px 30px;
+            background: linear-gradient(180deg, #fafafa 0%, #f5f5f5 100%);
+            border-top: 1px solid rgba(229, 231, 235, 0.6);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .form-group {
+            margin-bottom: 24px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #334155;
+            margin-bottom: 10px;
+        }
+
+        .form-input, .form-textarea {
+            width: 100%;
+            padding: 14px 18px;
+            border: 2px solid rgba(229, 231, 235, 0.6);
+            border-radius: 12px;
+            font-size: 15px;
+            font-family: inherit;
+            outline: none;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .form-input:focus, .form-textarea:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
+        }
+
+        .form-textarea {
+            min-height: 120px;
+            resize: vertical;
+            line-height: 1.6;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border-radius: 12px;
+            font-size: 14px;
+            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 80px 20px;
+            color: #94a3b8;
+        }
+
+        .empty-state #lottie-empty {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto 24px;
+        }
+
+        .empty-state .text {
+            font-size: 16px;
+            font-weight: 500;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 60px;
+        }
+
+        .loading #lottie-loading {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 20px;
+        }
+
+        .loading .text {
+            color: #64748b;
+            font-size: 15px;
+        }
+
+        /* Toast 通知 */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            padding: 16px 28px;
+            background: white;
+            border-radius: 16px;
+            font-size: 15px;
+            font-weight: 500;
+            opacity: 0;
+            transform: translateX(100px);
+            transition: all 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            z-index: 2000;
+            box-shadow: var(--shadow-lg);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 280px;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .toast.success {
+            border-left: 4px solid var(--success-color);
+        }
+
+        .toast.success::before {
+            content: '✓';
+            width: 24px;
+            height: 24px;
+            background: var(--success-color);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        .toast.error {
+            border-left: 4px solid var(--danger-color);
+        }
+
+        .toast.error::before {
+            content: '✕';
+            width: 24px;
+            height: 24px;
+            background: var(--danger-color);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+        }
+
+        /* 确认对话框 */
+        .confirm-dialog {
+            text-align: center;
+        }
+
+        .confirm-dialog #lottie-warning {
+            width: 120px;
+            height: 120px;
+            margin: 0 auto 20px;
+        }
+
+        .confirm-dialog p {
+            color: #64748b;
+            font-size: 16px;
+            margin-bottom: 24px;
+        }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(241, 245, 249, 0.5);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: linear-gradient(180deg, var(--primary-light), var(--primary-color));
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--primary-dark);
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                border-radius: 20px;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 20px;
+            }
+
+            .stats {
+                padding: 20px;
+                gap: 12px;
+            }
+
+            .stat-item {
+                padding: 16px 20px;
+                flex-direction: column;
+                text-align: center;
+            }
+
+            .stat-icon {
+                width: 48px;
+                height: 48px;
+                font-size: 22px;
+            }
+
+            .stat-item .count {
+                font-size: 28px;
+            }
+
+            .content {
+                padding: 20px;
+            }
+
+            .feedback-list {
+                grid-template-columns: 1fr;
+            }
+
+            .toolbar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-box {
+                min-width: 100%;
+            }
+
+            .filter-bar {
+                justify-content: center;
+            }
+
+            .feedback-header {
+                flex-direction: column;
+            }
+
+            .feedback-actions {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .btn-sm {
+                flex: 1;
+                justify-content: center;
+            }
+
+            .toast {
+                right: 20px;
+                left: 20px;
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-decoration"></div>
+
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <div class="header-icon">📊</div>
+                <h1>反馈管理中心</h1>
+            </div>
+            <a href="/" class="back-btn">
+                <span>←</span>
+                <span>返回问答</span>
+            </a>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-icon total">📋</div>
+                <div class="stat-content">
+                    <div class="count" id="total-count">0</div>
+                    <div class="label">总反馈数</div>
+                </div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-icon dislike">👎</div>
+                <div class="stat-content">
+                    <div class="count" id="dislike-count">0</div>
+                    <div class="label">贬低反馈</div>
+                </div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-icon like">👍</div>
+                <div class="stat-content">
+                    <div class="count" id="like-count">0</div>
+                    <div class="label">点赞反馈</div>
+                </div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-icon updated">✓</div>
+                <div class="stat-content">
+                    <div class="count" id="updated-count">0</div>
+                    <div class="label">已修改总数</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="content">
+            <div class="toolbar">
+                <div class="search-box">
+                    <input type="text" id="search-input" placeholder="搜索反馈内容..." onkeyup="handleSearch(event)">
+                    <span class="search-icon">🔍</span>
+                </div>
+                <div class="filter-bar">
+                    <button class="filter-btn active" data-type="all" onclick="filterFeedback('all')">
+                        <span>📑 全部</span>
+                    </button>
+                    <button class="filter-btn" data-type="dislike" onclick="filterFeedback('dislike')">
+                        <span>👎 贬低</span>
+                    </button>
+                    <button class="filter-btn" data-type="like" onclick="filterFeedback('like')">
+                        <span>👍 点赞</span>
+                    </button>
+                </div>
+            </div>
+
+            <h2 class="section-title">反馈列表</h2>
+            <div class="feedback-list" id="feedback-list">
+                <div class="loading">
+                    <div id="lottie-loading"></div>
+                    <div class="text">正在加载反馈数据...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 编辑反馈弹窗 -->
+    <div class="modal" id="edit-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>✏️ 编辑反馈</h3>
+                <button class="modal-close" onclick="closeEditModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="edit-feedback-id">
+                <div class="form-group">
+                    <label class="form-label">用户问题</label>
+                    <textarea class="form-textarea" id="edit-question"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">机器人回复</label>
+                    <textarea class="form-textarea" id="edit-answer"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" style="background: #f1f5f9; color: #64748b;" onclick="closeEditModal()">取消</button>
+                <button class="btn btn-edit" style="background: var(--primary-color); color: white;" onclick="saveEdit()">保存修改</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除确认弹窗 -->
+    <div class="modal" id="delete-modal">
+        <div class="modal-content" style="max-width: 420px;">
+            <div class="modal-body confirm-dialog">
+                <div id="lottie-warning"></div>
+                <p>确定要删除这条反馈吗？此操作无法撤销。</p>
+            </div>
+            <div class="modal-footer" style="justify-content: center;">
+                <button class="btn" style="background: #f1f5f9; color: #64748b;" onclick="closeDeleteModal()">取消</button>
+                <button class="btn btn-delete" style="background: var(--danger-color); color: white;" onclick="confirmDelete()">确认删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加到知识库弹窗 -->
+    <div class="modal" id="knowledge-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📚 添加到知识库</h3>
+                <button class="modal-close" onclick="closeKnowledgeModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="kb-feedback-id">
+                <div class="form-group">
+                    <label class="form-label">问题描述（可编辑）</label>
+                    <textarea class="form-textarea" id="kb-question"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">问题处理结果（可编辑）</label>
+                    <textarea class="form-textarea" id="kb-answer"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn" style="background: #f1f5f9; color: #64748b;" onclick="closeKnowledgeModal()">取消</button>
+                <button class="btn btn-add-kb" style="background: var(--success-color); color: white;" onclick="addToKnowledge()">添加到知识库</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+
+    <script>
+        // Lottie 动画配置
+        let loadingAnimation = null;
+        let emptyAnimation = null;
+        let warningAnimation = null;
+
+        // 初始化动画
+        function initAnimations() {
+            // 加载动画
+            const loadingContainer = document.getElementById('lottie-loading');
+            if (loadingContainer && !loadingAnimation) {
+                loadingAnimation = lottie.loadAnimation({
+                    container: loadingContainer,
+                    renderer: 'svg',
+                    loop: true,
+                    autoplay: true,
+                    path: 'https://lottie.host/8dbb938b-5c0e-4b2d-9ee5-5c2e5f5e5f5f/DtF7Xz3jPb.json'
+                });
+            }
+
+            // 警告动画
+            const warningContainer = document.getElementById('lottie-warning');
+            if (warningContainer && !warningAnimation) {
+                warningAnimation = lottie.loadAnimation({
+                    container: warningContainer,
+                    renderer: 'svg',
+                    loop: true,
+                    autoplay: false,
+                    path: 'https://lottie.host/8dbb938b-5c0e-4b2d-9ee5-5c2e5f5e5f5f/warning.json'
+                });
+            }
+        }
+
+        function showEmptyAnimation() {
+            const emptyContainer = document.getElementById('lottie-empty');
+            if (emptyContainer && !emptyAnimation) {
+                emptyAnimation = lottie.loadAnimation({
+                    container: emptyContainer,
+                    renderer: 'svg',
+                    loop: true,
+                    autoplay: true,
+                    path: 'https://lottie.host/8dbb938b-5c0e-4b2d-9ee5-5c2e5f5e5f5f/empty.json'
+                });
+            } else if (emptyAnimation) {
+                emptyAnimation.play();
+            }
+        }
+
+        let allFeedback = [];
+        let currentFilter = 'all';
+        let deleteTargetId = null;
+        let searchTimeout = null;
+
+        // 加载反馈数据
+        async function loadFeedback() {
+            try {
+                const response = await fetch('/api/feedback');
+                const data = await response.json();
+                allFeedback = data.feedback || [];
+                renderFeedback(allFeedback);
+                updateStats();
+            } catch (err) {
+                console.error('加载反馈失败:', err);
+                document.getElementById('feedback-list').innerHTML = `
+                    <div class="empty-state">
+                        <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                        <div class="text">加载失败，请刷新页面重试</div>
+                    </div>`;
+            }
+        }
+
+        // 更新统计 - 添加数字动画
+        function updateStats() {
+            animateNumber('total-count', allFeedback.length);
+            animateNumber('dislike-count', allFeedback.filter(f => f.type === 'dislike').length);
+            animateNumber('like-count', allFeedback.filter(f => f.type === 'like').length);
+            animateNumber('updated-count', allFeedback.filter(f => f.knowledgeId).length);
+        }
+
+        // 数字动画效果
+        function animateNumber(elementId, target) {
+            const element = document.getElementById(elementId);
+            const current = parseInt(element.textContent) || 0;
+            const duration = 500;
+            const startTime = performance.now();
+
+            function update(currentTime) {
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+                const easeProgress = 1 - Math.pow(1 - progress, 3);
+                const currentNumber = Math.floor(current + (target - current) * easeProgress);
+                element.textContent = currentNumber;
+
+                if (progress < 1) {
+                    requestAnimationFrame(update);
+                }
+            }
+
+            requestAnimationFrame(update);
+        }
+
+        // 过滤反馈 - 添加切换动画
+        function filterFeedback(type) {
+            currentFilter = type;
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelector(`.filter-btn[data-type="${type}"]`).classList.add('active');
+
+            const container = document.getElementById('feedback-list');
+            container.style.opacity = '0';
+            container.style.transform = 'translateY(10px)';
+
+            setTimeout(() => {
+                const keyword = document.getElementById('search-input').value.trim();
+                if (keyword) {
+                    searchFeedback(keyword);
+                } else {
+                    if (type === 'all') {
+                        renderFeedback(allFeedback);
+                    } else {
+                        const filtered = allFeedback.filter(f => f.type === type);
+                        renderFeedback(filtered);
+                    }
+                }
+                container.style.opacity = '1';
+                container.style.transform = 'translateY(0)';
+            }, 200);
+        }
+
+        // 搜索处理
+        function handleSearch(event) {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                const keyword = event.target.value.trim();
+                if (keyword) {
+                    searchFeedback(keyword);
+                } else {
+                    filterFeedback(currentFilter);
+                }
+            }, 300);
+        }
+
+        // 搜索反馈
+        async function searchFeedback(keyword) {
+            try {
+                const type = currentFilter === 'all' ? '' : currentFilter;
+                const response = await fetch(`/api/feedback/search?keyword=${encodeURIComponent(keyword)}&type=${type}`);
+                const data = await response.json();
+                renderFeedback(data.feedback || []);
+            } catch (err) {
+                console.error('搜索失败:', err);
+            }
+        }
+
+        // 渲染反馈列表
+        function renderFeedback(feedbackList) {
+            const container = document.getElementById('feedback-list');
+
+            if (feedbackList.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state" style="grid-column: 1 / -1;">
+                        <div id="lottie-empty"></div>
+                        <div class="text">暂无反馈数据</div>
+                    </div>`;
+                showEmptyAnimation();
+                return;
+            }
+
+            container.innerHTML = feedbackList.map((item, index) => `
+                <div class="feedback-item ${item.type}" data-id="${item.id}" style="animation-delay: ${index * 0.05}s;">
+                    <div class="feedback-header">
+                        <div class="feedback-left">
+                            <span class="feedback-type ${item.type}">
+                                ${item.type === 'like' ? '👍' : '👎'}
+                                ${item.type === 'like' ? '满意' : '不满意'}
+                            </span>
+                            <span class="feedback-time">🕐 ${item.time}</span>
+                            ${item.knowledgeId ? '<span class="badge badge-updated">✓ 已修改</span>' : ''}
+                        </div>
+                        <div class="feedback-actions">
+                            <button class="toggle-btn" onclick="toggleContent('${item.id}')" id="toggle-${item.id}">
+                                <span class="icon">▼</span>
+                                <span id="toggle-text-${item.id}">展开</span>
+                            </button>
+                            <button class="btn-sm btn-edit" onclick="showEditModal('${item.id}')">✏️ 编辑</button>
+                            <button class="btn-sm btn-delete" onclick="showDeleteModal('${item.id}')">🗑️ 删除</button>
+                            <button class="btn-sm btn-add-kb" onclick="showKnowledgeModal('${item.id}')">📚 加知识库</button>
+                        </div>
+                    </div>
+
+                    <div class="feedback-preview" id="preview-${item.id}">
+                        <span class="icon">💬</span>
+                        <span class="feedback-preview-text">${escapeHtml(item.user)}</span>
+                    </div>
+
+                    <div class="feedback-content collapsed" id="content-${item.id}">
+                        <div class="feedback-label">用户问题</div>
+                        <div class="feedback-text user">${escapeHtml(item.user)}</div>
+
+                        <div class="feedback-label" style="margin-top: 12px;">机器人回复</div>
+                        <div class="feedback-text bot">${escapeHtml(item.bot)}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 转义HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 切换内容展开/折叠
+        function toggleContent(id) {
+            const content = document.getElementById(`content-${id}`);
+            const preview = document.getElementById(`preview-${id}`);
+            const toggleBtn = document.getElementById(`toggle-${id}`);
+            const toggleText = document.getElementById(`toggle-text-${id}`);
+
+            if (content.classList.contains('collapsed')) {
+                // 展开
+                content.classList.remove('collapsed');
+                content.classList.add('expanded');
+                preview.style.display = 'none';
+                toggleBtn.classList.add('expanded');
+                toggleText.textContent = '收起';
+            } else {
+                // 折叠
+                content.classList.remove('expanded');
+                content.classList.add('collapsed');
+                preview.style.display = 'flex';
+                toggleBtn.classList.remove('expanded');
+                toggleText.textContent = '展开';
+            }
+        }
+
+        // 显示编辑弹窗
+        function showEditModal(id) {
+            const feedback = allFeedback.find(f => f.id === id);
+            if (!feedback) return;
+
+            document.getElementById('edit-feedback-id').value = id;
+            document.getElementById('edit-question').value = feedback.user;
+            document.getElementById('edit-answer').value = feedback.bot;
+            document.getElementById('edit-modal').classList.add('show');
+        }
+
+        // 关闭编辑弹窗
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.remove('show');
+        }
+
+        // 保存编辑
+        async function saveEdit() {
+            const id = document.getElementById('edit-feedback-id').value;
+            const question = document.getElementById('edit-question').value.trim();
+            const answer = document.getElementById('edit-answer').value.trim();
+
+            if (!question || !answer) {
+                showToast('用户问题和机器人回复不能为空', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/feedback/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user: question, bot: answer })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('修改成功！', 'success');
+                    closeEditModal();
+                    loadFeedback();
+                } else {
+                    showToast(data.message || '保存失败', 'error');
+                }
+            } catch (err) {
+                console.error('保存失败:', err);
+                showToast('保存失败，请重试', 'error');
+            }
+        }
+
+        // 显示删除确认弹窗
+        function showDeleteModal(id) {
+            deleteTargetId = id;
+            document.getElementById('delete-modal').classList.add('show');
+            if (warningAnimation) {
+                warningAnimation.play();
+            }
+        }
+
+        // 关闭删除弹窗
+        function closeDeleteModal() {
+            document.getElementById('delete-modal').classList.remove('show');
+            if (warningAnimation) {
+                warningAnimation.stop();
+            }
+            deleteTargetId = null;
+        }
+
+        // 确认删除
+        async function confirmDelete() {
+            if (!deleteTargetId) return;
+
+            try {
+                const response = await fetch(`/api/feedback/${deleteTargetId}`, {
+                    method: 'DELETE'
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast('删除成功！', 'success');
+                    closeDeleteModal();
+                    loadFeedback();
+                } else {
+                    showToast(data.message || '删除失败', 'error');
+                }
+            } catch (err) {
+                console.error('删除失败:', err);
+                showToast('删除失败，请重试', 'error');
+            }
+        }
+
+        // 显示添加到知识库弹窗
+        function showKnowledgeModal(id) {
+            const feedback = allFeedback.find(f => f.id === id);
+            if (!feedback) return;
+
+            document.getElementById('kb-feedback-id').value = id;
+            document.getElementById('kb-question').value = feedback.user;
+            document.getElementById('kb-answer').value = feedback.bot;
+            document.getElementById('knowledge-modal').classList.add('show');
+        }
+
+        // 关闭知识库弹窗
+        function closeKnowledgeModal() {
+            document.getElementById('knowledge-modal').classList.remove('show');
+        }
+
+        // 添加到知识库
+        async function addToKnowledge() {
+            const question = document.getElementById('kb-question').value.trim();
+            const answer = document.getElementById('kb-answer').value.trim();
+
+            if (!question || !answer) {
+                showToast('问题和答案不能为空', 'error');
+                return;
+            }
+
+            try {
+                const kbResponse = await fetch('/api/knowledge/add', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question, answer })
+                });
+                const kbData = await kbResponse.json();
+
+                if (kbData.success) {
+                    showToast('添加成功！', 'success');
+                    closeKnowledgeModal();
+
+                    // 获取反馈ID并更新，添加knowledgeId标记
+                    const feedbackId = document.getElementById('kb-feedback-id').value;
+                    if (feedbackId) {
+                        const updateResponse = await fetch(`/api/feedback/${feedbackId}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                user: document.getElementById('kb-question').value,
+                                bot: document.getElementById('kb-answer').value,
+                                knowledgeId: kbData.knowledgeId
+                            })
+                        });
+                        const updateData = await updateResponse.json();
+                        if (updateData.success) {
+                            // 重新加载反馈列表以显示"已修改"标签
+                            loadFeedback();
+                        }
+                    }
+                } else {
+                    showToast(kbData.message || '添加失败', 'error');
+                }
+            } catch (err) {
+                console.error('添加失败:', err);
+                showToast('添加失败，请重试', 'error');
+            }
+        }
+
+        // 显示提示
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.innerHTML = `<span>${message}</span>`;
+            toast.className = `toast ${type} show`;
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // 点击弹窗外部关闭
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) {
+                    modal.classList.remove('show');
+                    if (modal.id === 'delete-modal' && warningAnimation) {
+                        warningAnimation.stop();
+                    }
+                }
+            });
+        });
+
+        // ESC键关闭弹窗
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal.show').forEach(modal => {
+                    modal.classList.remove('show');
+                    if (modal.id === 'delete-modal' && warningAnimation) {
+                        warningAnimation.stop();
+                    }
+                });
+            }
+        });
+
+        // 页面加载
+        document.addEventListener('DOMContentLoaded', () => {
+            initAnimations();
+            loadFeedback();
+        });
+    </script>
+</body>
+</html>

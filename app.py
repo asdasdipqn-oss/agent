@@ -59,6 +59,7 @@ MAX_CACHE_SIZE = 100  # 最大缓存数量
 
 # 对话上下文配置
 CONVERSATION_HISTORY = {}  # 会话历史：{session_id: [{role, content, timestamp}]}
+CHAT_HISTORY = []  # 聊天记录历史：[{user, bot, time}]
 MAX_HISTORY_LENGTH = 6  # 每个会话保留的历史消息数
 DEFAULT_SESSION_ID = 'default'  # 默认会话ID
 
@@ -298,9 +299,6 @@ def clear_conversation(session_id=DEFAULT_SESSION_ID):
     if session_id in CONVERSATION_HISTORY:
         del CONVERSATION_HISTORY[session_id]
         print(f"会话 {session_id} 历史已清空")
-
-# ============= 知识库embedding缓存 =============
-KNOWLEDGE_EMBEDDINGS = {}
 
 
 def get_embeddings_for_knowledge():
@@ -589,20 +587,41 @@ def feedback():
 
 @app.route('/api/knowledge/add', methods=['POST'])
 def add_to_knowledge():
-    """添加新条目到知识库"""
+    """添加或更新知识库条目"""
     data = request.get_json()
     question = data.get('question', '').strip()
     answer = data.get('answer', '').strip()
+    knowledge_id = data.get('knowledgeId', '')  # 获取knowledgeId，如果有则更新已有记录
 
     if not question or not answer:
         return jsonify({'success': False, 'message': '问题和答案不能为空'}), 400
 
-    # 添加到知识库
-    new_index = len(KNOWLEDGE)
-    KNOWLEDGE.append({
-        '问题描述': question,
-        '问题处理结果': answer
-    })
+    # 解析knowledgeId，格式为 kb_x
+    target_index = None
+    if knowledge_id and knowledge_id.startswith('kb_'):
+        try:
+            target_index = int(knowledge_id.split('_')[1])
+            # 检查索引是否有效
+            if target_index >= len(KNOWLEDGE):
+                target_index = None
+        except:
+            target_index = None
+
+    # 如果有有效的knowledgeId，则更新已有记录；否则添加新记录
+    if target_index is not None:
+        # 更新已有记录
+        KNOWLEDGE[target_index]['问题描述'] = question
+        KNOWLEDGE[target_index]['问题处理结果'] = answer
+        new_index = target_index
+        action = "更新"
+    else:
+        # 添加新记录
+        new_index = len(KNOWLEDGE)
+        KNOWLEDGE.append({
+            '问题描述': question,
+            '问题处理结果': answer
+        })
+        action = "添加"
 
     # 保存到文件
     try:
@@ -614,17 +633,18 @@ def add_to_knowledge():
         if emb:
             global KNOWLEDGE_EMBEDDINGS
             KNOWLEDGE_EMBEDDINGS[new_index] = emb
-            print(f"新条目embedding已缓存，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
+            print(f"知识库条目{action}成功，embedding已缓存，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
 
         # 清空相关缓存
         clear_cache()
 
         # 返回knowledgeId给前端
         knowledge_id = f"kb_{new_index}"
-        return jsonify({'success': True, 'message': '添加成功', 'knowledgeId': knowledge_id})
+        return jsonify({'success': True, 'message': f'{action}成功', 'knowledgeId': knowledge_id})
     except Exception as e:
-        # 回滚内存中的数据
-        KNOWLEDGE.pop()
+        # 如果是新增操作，回滚内存中的数据
+        if target_index is None and len(KNOWLEDGE) > new_index:
+            KNOWLEDGE.pop()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/chat', methods=['POST'])
@@ -694,16 +714,10 @@ def chat():
         print(f"问题分析失败: {e}，使用原问题检索")
         analysis_result = {'keywords': [query], 'intent': 'general', 'module': 'general'}
 
-    # 第三步：基于分析结果检索知识库
-    # 使用分析出的关键词进行检索
-    search_keywords = analysis_result.get('keywords', [query])
-    print(f"使用关键词检索: {search_keywords}")
-
-    # 关键词检索
-    all_matches = []
-    for keyword in search_keywords[:3]:
-        kw_matches = find_best_match(keyword, top_k=5)
-        all_matches.extend(kw_matches)
+    # 第三步：基于embedding向量检索知识库
+    # 直接使用embedding向量匹配，比关键词匹配更准确
+    print(f"使用embedding向量检索: {query}")
+    all_matches = find_by_embedding(query, top_k=20)
 
     # 去重
     seen = {}
@@ -908,6 +922,7 @@ def get_history():
 @app.route('/api/history', methods=['POST'])
 def save_chat():
     """保存单条聊天记录"""
+    global CHAT_HISTORY
     data = request.get_json()
     user_message = data.get('user', '').strip()
     bot_message = data.get('bot', '').strip()
@@ -1340,7 +1355,7 @@ def chat_with_image():
 
 if __name__ == '__main__':
     print(f"知识库已加载，共 {len(KNOWLEDGE)} 条问答")
-    # 暂时禁用预计算embedding，加快启动速度
-    # get_embeddings_for_knowledge()
+    # 启动时计算所有知识库的embedding
+    update_knowledge_embedding()
     print("服务启动中...")
     app.run(host='0.0.0.0', port=5000, debug=True)

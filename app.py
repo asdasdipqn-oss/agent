@@ -59,6 +59,7 @@ MAX_CACHE_SIZE = 100  # 最大缓存数量
 
 # 对话上下文配置
 CONVERSATION_HISTORY = {}  # 会话历史：{session_id: [{role, content, timestamp}]}
+CHAT_HISTORY = []  # 聊天记录历史：[{user, bot, time}]
 MAX_HISTORY_LENGTH = 6  # 每个会话保留的历史消息数
 DEFAULT_SESSION_ID = 'default'  # 默认会话ID
 
@@ -298,9 +299,6 @@ def clear_conversation(session_id=DEFAULT_SESSION_ID):
     if session_id in CONVERSATION_HISTORY:
         del CONVERSATION_HISTORY[session_id]
         print(f"会话 {session_id} 历史已清空")
-
-# ============= 知识库embedding缓存 =============
-KNOWLEDGE_EMBEDDINGS = {}
 
 
 def get_embeddings_for_knowledge():
@@ -716,16 +714,10 @@ def chat():
         print(f"问题分析失败: {e}，使用原问题检索")
         analysis_result = {'keywords': [query], 'intent': 'general', 'module': 'general'}
 
-    # 第三步：基于分析结果检索知识库
-    # 使用分析出的关键词进行检索
-    search_keywords = analysis_result.get('keywords', [query])
-    print(f"使用关键词检索: {search_keywords}")
-
-    # 关键词检索
-    all_matches = []
-    for keyword in search_keywords[:3]:
-        kw_matches = find_best_match(keyword, top_k=5)
-        all_matches.extend(kw_matches)
+    # 第三步：基于embedding向量检索知识库
+    # 直接使用embedding向量匹配，比关键词匹配更准确
+    print(f"使用embedding向量检索: {query}")
+    all_matches = find_by_embedding(query, top_k=20)
 
     # 去重
     seen = {}
@@ -930,6 +922,7 @@ def get_history():
 @app.route('/api/history', methods=['POST'])
 def save_chat():
     """保存单条聊天记录"""
+    global CHAT_HISTORY
     data = request.get_json()
     user_message = data.get('user', '').strip()
     bot_message = data.get('bot', '').strip()
@@ -1362,7 +1355,7 @@ def chat_with_image():
 
 if __name__ == '__main__':
     print(f"知识库已加载，共 {len(KNOWLEDGE)} 条问答")
-    # 暂时禁用预计算embedding，加快启动速度
-    # get_embeddings_for_knowledge()
+    # 启动时计算所有知识库的embedding
+    update_knowledge_embedding()
     print("服务启动中...")
     app.run(host='0.0.0.0', port=5000, debug=True)

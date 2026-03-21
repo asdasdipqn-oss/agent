@@ -589,20 +589,41 @@ def feedback():
 
 @app.route('/api/knowledge/add', methods=['POST'])
 def add_to_knowledge():
-    """添加新条目到知识库"""
+    """添加或更新知识库条目"""
     data = request.get_json()
     question = data.get('question', '').strip()
     answer = data.get('answer', '').strip()
+    knowledge_id = data.get('knowledgeId', '')  # 获取knowledgeId，如果有则更新已有记录
 
     if not question or not answer:
         return jsonify({'success': False, 'message': '问题和答案不能为空'}), 400
 
-    # 添加到知识库
-    new_index = len(KNOWLEDGE)
-    KNOWLEDGE.append({
-        '问题描述': question,
-        '问题处理结果': answer
-    })
+    # 解析knowledgeId，格式为 kb_x
+    target_index = None
+    if knowledge_id and knowledge_id.startswith('kb_'):
+        try:
+            target_index = int(knowledge_id.split('_')[1])
+            # 检查索引是否有效
+            if target_index >= len(KNOWLEDGE):
+                target_index = None
+        except:
+            target_index = None
+
+    # 如果有有效的knowledgeId，则更新已有记录；否则添加新记录
+    if target_index is not None:
+        # 更新已有记录
+        KNOWLEDGE[target_index]['问题描述'] = question
+        KNOWLEDGE[target_index]['问题处理结果'] = answer
+        new_index = target_index
+        action = "更新"
+    else:
+        # 添加新记录
+        new_index = len(KNOWLEDGE)
+        KNOWLEDGE.append({
+            '问题描述': question,
+            '问题处理结果': answer
+        })
+        action = "添加"
 
     # 保存到文件
     try:
@@ -614,17 +635,18 @@ def add_to_knowledge():
         if emb:
             global KNOWLEDGE_EMBEDDINGS
             KNOWLEDGE_EMBEDDINGS[new_index] = emb
-            print(f"新条目embedding已缓存，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
+            print(f"知识库条目{action}成功，embedding已缓存，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
 
         # 清空相关缓存
         clear_cache()
 
         # 返回knowledgeId给前端
         knowledge_id = f"kb_{new_index}"
-        return jsonify({'success': True, 'message': '添加成功', 'knowledgeId': knowledge_id})
+        return jsonify({'success': True, 'message': f'{action}成功', 'knowledgeId': knowledge_id})
     except Exception as e:
-        # 回滚内存中的数据
-        KNOWLEDGE.pop()
+        # 如果是新增操作，回滚内存中的数据
+        if target_index is None and len(KNOWLEDGE) > new_index:
+            KNOWLEDGE.pop()
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/chat', methods=['POST'])

@@ -690,40 +690,6 @@
             margin-bottom: 30px;
         }
 
-        /* 快捷问题 */
-        .suggestions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .suggestion-btn {
-            padding: 12px 20px;
-            background: var(--glass-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 24px;
-            font-size: 14px;
-            color: var(--text-primary);
-            cursor: pointer;
-            transition: all 0.25s ease;
-            font-weight: 400;
-        }
-
-        .suggestion-btn:hover {
-            background: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-md);
-        }
-
-        .suggestion-btn:active {
-            transform: translateY(0);
-        }
-
         /* OCR Result */
         .ocr-result-container {
             padding: 12px;
@@ -891,15 +857,6 @@
             .welcome-message h2 {
                 font-size: 22px;
             }
-
-            .suggestions {
-                gap: 8px;
-            }
-
-            .suggestion-btn {
-                padding: 10px 16px;
-                font-size: 13px;
-            }
         }
 
         /* 主题切换动画 */
@@ -930,7 +887,7 @@
 <body data-theme="light">
     <div class="container">
         <div class="header">
-            <div class="logo" id="header-logo">🛡️</div>
+            <div class="logo" id="header-logo">☁️</div>
             <div class="header-text">
                 <h1>雷池智能问答助手</h1>
                 <p>您的WAF问题解答专家</p>
@@ -952,12 +909,6 @@
                 <div id="lottie-container"></div>
                 <h2>您好，欢迎使用雷池智能问答助手</h2>
                 <p>我可以帮您解答关于雷池WAF的各种问题，包括配置、部署、故障排查等</p>
-                <div class="suggestions">
-                    <button class="suggestion-btn" onclick="sendMessage('如何安装雷池WAF？')">📦 如何安装雷池WAF？</button>
-                    <button class="suggestion-btn" onclick="sendMessage('如何配置Nginx反向代理？')">⚙️ 如何配置Nginx反向代理？</button>
-                    <button class="suggestion-btn" onclick="sendMessage('如何查看访问日志？')">📊 如何查看访问日志？</button>
-                    <button class="suggestion-btn" onclick="sendMessage('如何停止/启动雷池服务？')">🚀 如何停止/启动服务？</button>
-                </div>
             </div>
             <div id="loading-lottie"></div>
             <div id="sending-lottie"></div>

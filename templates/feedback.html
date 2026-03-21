@@ -1545,6 +1545,8 @@
             document.getElementById('kb-feedback-id').value = id;
             document.getElementById('kb-question').value = feedback.user;
             document.getElementById('kb-answer').value = feedback.bot;
+            // 如果已有knowledgeId，存储到data属性中
+            document.getElementById('kb-feedback-id').dataset.knowledgeId = feedback.knowledgeId || '';
             document.getElementById('knowledge-modal').classList.add('show');
         }
 
@@ -1557,6 +1559,8 @@
         async function addToKnowledge() {
             const question = document.getElementById('kb-question').value.trim();
             const answer = document.getElementById('kb-answer').value.trim();
+            const feedbackId = document.getElementById('kb-feedback-id').value;
+            const existingKnowledgeId = document.getElementById('kb-feedback-id').dataset.knowledgeId || '';
 
             if (!question || !answer) {
                 showToast('问题和答案不能为空', 'error');
@@ -1564,26 +1568,31 @@
             }
 
             try {
+                // 如果已有knowledgeId，则传递给后端进行更新
+                const requestBody = { question, answer };
+                if (existingKnowledgeId) {
+                    requestBody.knowledgeId = existingKnowledgeId;
+                }
+
                 const kbResponse = await fetch('/api/knowledge/add', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ question, answer })
+                    body: JSON.stringify(requestBody)
                 });
                 const kbData = await kbResponse.json();
 
                 if (kbData.success) {
-                    showToast('添加成功！', 'success');
+                    showToast(kbData.message || '操作成功！', 'success');
                     closeKnowledgeModal();
 
-                    // 获取反馈ID并更新，添加knowledgeId标记
-                    const feedbackId = document.getElementById('kb-feedback-id').value;
+                    // 更新反馈记录的knowledgeId标记
                     if (feedbackId) {
                         const updateResponse = await fetch(`/api/feedback/${feedbackId}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
-                                user: document.getElementById('kb-question').value,
-                                bot: document.getElementById('kb-answer').value,
+                                user: question,
+                                bot: answer,
                                 knowledgeId: kbData.knowledgeId
                             })
                         });
@@ -1594,11 +1603,11 @@
                         }
                     }
                 } else {
-                    showToast(kbData.message || '添加失败', 'error');
+                    showToast(kbData.message || '操作失败', 'error');
                 }
             } catch (err) {
-                console.error('添加失败:', err);
-                showToast('添加失败，请重试', 'error');
+                console.error('操作失败:', err);
+                showToast('操作失败，请重试', 'error');
             }
         }
 

@@ -41,3 +41,7 @@ Thumbs.db
 # Backup files
 *.bak
 *.backup
+app.py.backup
+
+# url-to-markdown cache
+url-to-markdown/

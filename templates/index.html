@@ -440,6 +440,41 @@
             border-color: var(--danger-color);
         }
 
+        /* Tool Status */
+        .tool-status {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 12px 16px;
+            margin: 10px 0;
+            background: rgba(99, 102, 241, 0.1);
+            border-left: 3px solid var(--primary-color);
+            border-radius: 8px;
+        }
+
+        .tool-status-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+
+        .tool-status-content {
+            flex: 1;
+        }
+
+        .tool-status-message {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--primary-color);
+            margin-bottom: 6px;
+        }
+
+        .tool-status-result {
+            font-size: 13px;
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
         /* Sources */
         .sources {
             margin-top: 14px;
@@ -808,6 +843,10 @@
             50% { transform: scale(0.9); }
             100% { transform: scale(1); }
         }
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
 
         .send-btn.sending {
             animation: sendBtnPulse 0.5s ease-in-out infinite;
@@ -897,10 +936,35 @@
                     <span class="status-dot"></span>
                     <span id="knowledge-count">加载中...</span>
                 </div>
+                <div class="status-badge" id="waf-status-badge" style="display:none; background:rgba(34,197,94,0.15); color:#16a34a;">
+                    <span style="width:6px;height:6px;border-radius:50%;background:#22c55e;display:inline-block;"></span>
+                    WAF已连接
+                </div>
+                <button class="header-btn" onclick="toggleWafConfig()" title="WAF接口配置">⚙️</button>
                 <button class="header-btn theme-toggle" onclick="toggleTheme()" title="切换主题">
                     <span id="theme-icon">🌙</span>
                 </button>
                 <button class="header-btn" onclick="clearConversation()" title="清空对话">🔄</button>
+            </div>
+        </div>
+
+        <!-- WAF接口配置面板 -->
+        <div id="waf-config-panel" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; z-index:1000; background:rgba(0,0,0,0.5);" onclick="if(event.target===this)toggleWafConfig()">
+            <div style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:#ffffff; color:#1f2937; border-radius:16px; padding:24px; width:400px; max-width:90vw; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+                <h3 style="margin:0 0 16px 0;">WAF 接口配置</h3>
+                <p style="margin:0 0 16px 0; font-size:13px; color:#6b7280;">配置后可查询攻击日志、QPS、站点状态等实时数据</p>
+                <div style="margin-bottom:12px;">
+                    <label style="display:block; font-size:13px; color:#6b7280; margin-bottom:4px;">WAF API 地址</label>
+                    <input id="waf-base-url" type="text" placeholder="例: https://waf.example.com/api" style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; background:#f9fafb; color:#1f2937; font-size:14px; box-sizing:border-box;" />
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block; font-size:13px; color:#6b7280; margin-bottom:4px;">API Token</label>
+                    <input id="waf-api-token" type="password" placeholder="输入 WAF API Token" style="width:100%; padding:10px 12px; border:1px solid #d1d5db; border-radius:8px; background:#f9fafb; color:#1f2937; font-size:14px; box-sizing:border-box;" />
+                </div>
+                <div style="display:flex; gap:8px; justify-content:flex-end;">
+                    <button onclick="toggleWafConfig()" style="padding:8px 16px; border:1px solid #d1d5db; border-radius:8px; background:#f3f4f6; color:#374151; cursor:pointer;">取消</button>
+                    <button onclick="saveWafConfig()" style="padding:8px 16px; border:none; border-radius:8px; background:#3b82f6; color:#fff; cursor:pointer;">保存</button>
+                </div>
             </div>
         </div>
 
@@ -949,6 +1013,69 @@
         const sessionId = 'session_' + Date.now();
         const chatContainer = document.getElementById('chat-container');
         const userInput = document.getElementById('user-input');
+
+        // WAF接口配置（localStorage持久化）
+        let wafBaseUrl = localStorage.getItem('waf_base_url') || '';
+        let wafApiToken = localStorage.getItem('waf_api_token') || '';
+        // 页面加载时回填
+        document.getElementById('waf-base-url').value = wafBaseUrl;
+        document.getElementById('waf-api-token').value = wafApiToken;
+        // 初始化WAF状态显示
+        updateWafStatus();
+
+        function toggleWafConfig() {
+            const panel = document.getElementById('waf-config-panel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+
+        async function saveWafConfig() {
+            wafBaseUrl = document.getElementById('waf-base-url').value.trim();
+            wafApiToken = document.getElementById('waf-api-token').value.trim();
+            localStorage.setItem('waf_base_url', wafBaseUrl);
+            localStorage.setItem('waf_api_token', wafApiToken);
+
+            // 通过后端验证连接
+            const badge = document.getElementById('waf-status-badge');
+            if (wafBaseUrl && wafApiToken) {
+                badge.style.display = 'inline-block';
+                badge.style.background = 'rgba(234,179,8,0.15)';
+                badge.style.color = '#ca8a04';
+                badge.innerHTML = '验证中...';
+                try {
+                    const resp = await fetch('/api/waf/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ waf_base_url: wafBaseUrl, waf_api_token: wafApiToken })
+                    });
+                    const data = await resp.json();
+                    if (data.connected) {
+                        badge.style.background = 'rgba(34,197,94,0.15)';
+                        badge.style.color = '#16a34a';
+                        badge.innerHTML = 'WAF已连接';
+                    } else {
+                        badge.style.background = 'rgba(239,68,68,0.15)';
+                        badge.style.color = '#dc2626';
+                        badge.innerHTML = data.error || '连接失败';
+                    }
+                } catch(e) {
+                    badge.style.background = 'rgba(239,68,68,0.15)';
+                    badge.style.color = '#dc2626';
+                    badge.innerHTML = '连接失败';
+                }
+            } else {
+                badge.style.display = 'none';
+            }
+            toggleWafConfig();
+        }
+
+        function updateWafStatus() {
+            const url = localStorage.getItem('waf_base_url') || '';
+            const token = localStorage.getItem('waf_api_token') || '';
+            const badge = document.getElementById('waf-status-badge');
+            if (badge) {
+                badge.style.display = (url && token) ? 'inline-block' : 'none';
+            }
+        }
 
         // 初始化欢迎页面的Lottie动画
         const welcomeAnim = lottie.loadAnimation({
@@ -1031,8 +1158,19 @@
         });
 
         // 监听键盘事件
+        let isComposing = false; // 输入法状态标志
+
+        userInput.addEventListener('compositionstart', function() {
+            isComposing = true;
+        });
+
+        userInput.addEventListener('compositionend', function() {
+            isComposing = false;
+        });
+
         userInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            // 处理中文输入法：仅在未处于输入法组合状态时响应 Enter
+            if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
                 e.preventDefault();
                 sendUserMessage();
             }
@@ -1270,10 +1408,15 @@
                         message: queryMessage,
                         image: selectedImageBase64,
                         ocrText: ocrResult,
-                        session_id: sessionId
+                        session_id: sessionId,
+                        waf_base_url: localStorage.getItem('waf_base_url') || '',
+                        waf_api_token: localStorage.getItem('waf_api_token') || ''
                     };
                 } else {
-                    requestBody = { message, session_id: sessionId };
+                    // 每次发送时从localStorage读取最新配置，避免页面刷新后变量丢失
+                    const currentWafBaseUrl = localStorage.getItem('waf_base_url') || '';
+                    const currentWafApiToken = localStorage.getItem('waf_api_token') || '';
+                    requestBody = { message, session_id: sessionId, waf_base_url: currentWafBaseUrl, waf_api_token: currentWafApiToken };
                 }
 
                 const response = await fetch(apiEndpoint, {
@@ -1282,16 +1425,24 @@
                     body: JSON.stringify(requestBody)
                 });
 
+                if (!response.ok) {
+                    throw new Error(`HTTP错误: ${response.status}`);
+                }
+
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
                 let fullContent = '';
+                let sseBuffer = '';  // SSE事件缓冲区，处理跨chunk分割
 
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
 
-                    const text = decoder.decode(value);
-                    const lines = text.split('\n');
+                    sseBuffer += decoder.decode(value, { stream: true });
+                    const lines = sseBuffer.split('\n');
+
+                    // 最后一行可能不完整，保留在缓冲区
+                    sseBuffer = lines.pop() || '';
 
                     for (const line of lines) {
                         if (line.startsWith('data: ')) {
@@ -1301,6 +1452,10 @@
                                     loadingDiv.style.display = 'none';
                                     loadingAnim.stop();
 
+                                    // 如果之前有thinking状态，替换为最终内容
+                                    const thinkingDiv = botMsgDiv.querySelector('.agent-thinking');
+                                    if (thinkingDiv) thinkingDiv.remove();
+
                                     fullContent += data.content;
                                     const streamingContent = botMsgDiv.querySelector('.streaming-content');
                                     streamingContent.innerHTML = marked.parse(fullContent);
@@ -1308,8 +1463,27 @@
                                         hljs.highlightElement(block);
                                     });
                                     scrollToBottom();
+                                } else if (data.type === 'thinking') {
+                                    // Agent正在调用工具，显示思考过程
+                                    loadingDiv.style.display = 'none';
+                                    loadingAnim.stop();
+
+                                    let thinkingDiv = botMsgDiv.querySelector('.agent-thinking');
+                                    if (!thinkingDiv) {
+                                        thinkingDiv = document.createElement('div');
+                                        thinkingDiv.className = 'agent-thinking';
+                                        thinkingDiv.style.cssText = 'padding: 8px 12px; margin: 4px 0; background: rgba(59,130,246,0.1); border-radius: 8px; font-size: 13px; color: #6b7280; display: flex; align-items: center; gap: 6px;';
+                                        const streamingContent = botMsgDiv.querySelector('.streaming-content');
+                                        streamingContent.appendChild(thinkingDiv);
+                                    }
+                                    thinkingDiv.innerHTML = `<span style="display:inline-block;animation:spin 1s linear infinite;">⚙️</span> ${data.content}`;
+                                    scrollToBottom();
+                                } else if (data.type === 'done') {
+                                    // 流结束事件
                                 }
-                            } catch (e) {}
+                            } catch (e) {
+                                console.warn('SSE解析错误:', e);
+                            }
                         }
                     }
                 }
@@ -1554,6 +1728,28 @@
             ocrContainer.style.display = 'none';
             ocrText.value = '';
         }
+
+        // 粘贴图片支持
+        userInput.addEventListener('paste', function(e) {
+            const items = e.clipboardData && e.clipboardData.items;
+            if (!items) return;
+
+            for (let i = 0; i < items.length; i++) {
+                const item = items[i];
+                if (item.type.startsWith('image/')) {
+                    e.preventDefault();
+                    const file = item.getAsFile();
+                    if (!file) continue;
+
+                    if (file.size > MAX_IMAGE_SIZE) {
+                        alert('图片大小不能超过4MB');
+                        return;
+                    }
+                    compressImage(file);
+                    return; // 只处理第一张图片
+                }
+            }
+        });
 
         // 拖拽上传支持
         const inputArea = document.getElementById('input-area');

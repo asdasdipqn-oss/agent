@@ -1,8 +1,8 @@
 [
   {
-    "user": "如何在站点中修改代理超时时间？",
-    "bot": "要在站点中修改代理超时时间，您可以在站点详情的高级配置里自定义 nginx 配置，具体设置如下：\n\nproxy_connect_timeout 60s; # 与后端建立连接超时\nproxy_send_timeout 60s;   # 发送请求到后端超时\nproxy_read_timeout 60s;    # 读取后端响应超时\n\n请根据您的实际需求调整这些值。",
-    "type": "like",
-    "time": "2026-03-22 01:13:21"
+    "user": "查看所有的攻击日志",
+    "bot": "今日的流量分析如下：\n\n总访问量为：[get_advance_stats返回的总访问量]\n其中，正常访问量为：[get_advance_stats返回的正常访问量]\n攻击访问量为：[get_advance_stats返回的攻击访问量]\n拦截次数为：[get_advance_stats返回的拦截次数]\n\n流量趋势方面：\n\n访问量在[get_advance_trends返回的趋势描述]。\n\n请稍等，我将获取具体的数据并为您提供详细信息。\n调用工具：get_advance_stats 和 get_advance_trends\n参数分别为：\n\nget_advance_stats: {\"stat_type\": \"access\", \"begin_time\": 1778601600, \"end_time\": 1778663770}\nget_advance_trends: {\"trend_type\": \"access\", \"begin_time\": 1778601600, \"end_time\": 1778663770}",
+    "type": "dislike",
+    "time": "2026-05-13 17:17:58"
   }
 ]

@@ -86,95 +86,66 @@ def load_knowledge():
 KNOWLEDGE = load_knowledge()
 
 # 相似度阈值
-SIMILARITY_THRESHOLD = 0.8  # 高匹配度阈值，超过此值需要LLM整合多个答案
+SIMILARITY_THRESHOLD = 0.8
+
+# ============= Agent 配置 =============
+MAX_AGENT_STEPS = 5
+
+AGENT_SYSTEM_PROMPT = """你是雷池WAF智能助手。
+
+判断用户问题类型：
+- 知识类（产品怎么用、怎么配置、报错怎么办、功能说明、是什么意思等）：必须调用search_knowledge工具搜索知识库，基于搜索结果回答。
+- 操作类（查看日志、查看站点、添加规则、修改配置等）：使用WAF相关工具。不需要搜索知识库。
+- 无法判断时：先调用search_knowledge。
+
+绝对禁止：
+- 不调用search_knowledge就直接回答知识类问题
+- 不调用任何工具就直接说"超出能力范围"——你必须先调用search_knowledge搜索后，确认知识库确实没有相关内容，才能说超出能力范围。
+
+重要规则：
+1. 严格基于知识库和工具返回的数据回答，绝不编造信息
+2. 禁止使用自身知识回答任何问题，只能基于知识库搜索结果或WAF工具返回的数据来回答
+3. 只有当search_knowledge返回结果为空（total为0或results为空）时，才能回复："此问题超出我的能力范围，请联系群里的相关技术支持人员。"
+3. 如果知识库有相关内容，必须基于知识库结果回答，不要用自己的知识补充
+4. 如果工具调用失败，告知用户失败原因
+5. 回答要简洁、专业、友好
+6. 用中文回答
+7. 当用户的问题需要调用WAF接口时，如果WAF工具返回"未配置"或调用失败提示缺少配置，必须回复："此问题需要调用WAF接口，请在左侧配置栏中填写WAF API地址和API Token后重试。"
+8. 时间范围参数规则：
+   - 只有当用户明确提到时间范围（如"今天"、"昨天"、"本周"、"最近3天"等）时，才传begin_time/end_time参数
+   - 用户说"所有日志"、"全部日志"或不提时间时，不要传begin_time/end_time参数，让接口返回默认数据
+   - 绝对不要把系统消息中的"今天0点时间戳"和"当前时间戳"当作默认值使用
+9. 自定义规则(/open/policy)和IP组(/open/ipgroup)是完全不同的两个接口，绝对不能混淆：
+   - 自定义规则(policy)：有action属性，0=放行(白名单)，1=拦截(黑名单)，2=验证码，3=认证防护。用户提到黑白名单、拦截规则、放行规则时，必须用policy相关工具。
+   - IP组(ipgroup)：只是IP地址的集合，没有拦截或放行功能。用户提到IP组、IP集合时，必须用ipgroup相关工具。
+   - 用户说"添加黑名单/白名单"指的是添加规则，必须用create_custom_rule，不要用add_ip_to_group。
+   - 用户说"添加IP组"指的是创建IP地址集合，必须用create_ip_group，不要用create_custom_rule。
+10. 当用户想要执行创建、更新等操作时，如果用户没有提供完整的参数信息，不要自己猜测或编造参数值，而是告诉用户需要提供哪些参数、每个参数的含义和可选值。例如用户说"添加一个用户"，你应该回复"创建用户需要提供以下信息：username(用户名)、password(密码)、role(角色：1=管理员，2=操作员，3=配置员，4=审计员)、tfa_enabled(是否启用二次认证)"，等用户提供完整信息后再调用工具。
+11. **数据忠实性规则（最重要）**：
+   - 工具返回什么数据就汇报什么数据，绝对禁止编造工具未返回的数字或信息
+   - 例如：API返回access=3就只能说3次访问，绝不能编造成12,345次
+   - API没有返回"平均响应时间"就绝不能编造"200毫秒"
+   - API没有返回"正常/异常访问量"就绝不能编造这些数据
+   - 只呈现API实际返回的字段和值，不要添加、推测或美化数据
+   - 如果工具返回的数据为空或字段很少，就如实说"当前没有数据"或只展示返回的字段，绝对不要为了回答看起来"完整"而自己填补数据
+   - 禁止对数字做任何计算、汇总、估算，除非工具本身返回了汇总结果。例如不要把多条日志的次数加起来说"共XX次攻击"
+   - 禁止生成工具未返回的图表描述、趋势分析、占比分析等
+12. **回答方式规则**：
+   - 绝对禁止在回答中提及工具名称、调用参数、函数名、请求路径等技术细节，用户不需要知道这些
+   - 绝对禁止输出类似"我调用了xxx工具"、"参数为xxx"、"请求了/open/records接口"等内容
+   - 直接用自然语言给出结论，例如：用户问"查看攻击日志"，你应该回答"共发现XX条攻击，主要类型为XX，主要来源IP为XX"
+   - 禁止把工具返回的原始数据、日志、记录原样复述，必须提炼要点后简洁呈现
+   - 工具返回了数据就必须如实呈现，即使数据量很小也要汇报。只有工具确实返回空结果（total=0、空列表、无任何字段）时才能说"当前没有相关数据"
+   - 数据稀疏时突出有值的部分，例如"今日大部分时段无访问，14:00有3次访问"
+"""
 
 
-def extract_keywords_with_llm(query):
-    """用LLM提取问题的关键字段/关键词"""
-    global client
-    if not client:
-        if OPENAI_SDK_AVAILABLE and API_KEY:
-            try:
-                client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
-            except:
-                return None
-
-    try:
-        prompt = f"""请从以下用户问题中提取关键检索词（核心关键词），用于在知识库中检索相关问答。
-要求：
-1. 提取2-5个最核心的关键词
-2. 关键词应该是问题的主体内容，去掉修饰词
-3. 只输出关键词，用空格分隔，不要有其他内容
-
-用户问题：{query}
-
-关键词："""
-
-        response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {'role': 'system', 'content': '你是一个关键词提取助手。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            max_tokens=50,
-            temperature=0.3
-        )
-        keywords = response.choices[0].message.content.strip()
-        print(f"LLM提取关键词: {keywords}")
-        return keywords
-    except Exception as e:
-        print(f"LLM提取关键词失败: {e}")
-        return None
-
-def preprocess_text(text):
-    """文本预处理"""
-    if not text:
-        return ""
-    # 转小写，去除标点，分词
-    text = text.lower()
-    text = re.sub(r'[^\w\s]', ' ', text)
-    words = text.split()
-    return set(words)
-
-def get_keywords(text):
-    """提取关键词"""
-    words = preprocess_text(text)
-    # 过滤掉常见停用词
-    stop_words = {'的', '了', '是', '在', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这', '那', '吗', '呢', '吧', '啊', '吗', '嘛', '呀', '哦', '嗯', '哎', '咦', '唉', '喂', '嘿', '哈', '哇', '哟', '呦', '呃', '噢', '嗯'}
-    return words - stop_words
-
-def calculate_similarity(query, item):
-    """计算问题与知识库条目的相似度"""
-    query_keywords = get_keywords(query)
-    question_keywords = get_keywords(item['问题描述'])
-
-    if not query_keywords or not question_keywords:
-        return 0
-
-    # 计算交集
-    intersection = query_keywords & question_keywords
-    # 计算Jaccard相似度
-    union = query_keywords | question_keywords
-    similarity = len(intersection) / len(union) if union else 0
-
-    # 额外加权：如果查询词在问题描述中出现
-    question_lower = item['问题描述'].lower()
-    query_lower = query.lower()
-
-    # 检查是否包含查询的关键部分
-    query_parts = query_lower.replace('如何', ' ').replace('怎么', ' ').replace('怎样', ' ').replace('配置', ' ').split()
-    for part in query_parts:
-        if len(part) >= 2 and part in question_lower:
-            similarity += 0.3
-
-    # 模糊匹配：查询词是否部分匹配问题
-    for word in query_keywords:
-        if len(word) >= 2:
-            for qword in question_keywords:
-                if word in qword or qword in word:
-                    similarity += 0.2
-
-    return similarity
+def _get_date_prompt():
+    """生成包含当前日期的提示片段"""
+    now = datetime.now()
+    today_start = int(now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+    today_end = int(now.timestamp())
+    return f"\n\n当前时间：{now.strftime('%Y-%m-%d %H:%M:%S')}，今天0点时间戳：{today_start}，当前时间戳：{today_end}。"
 
 
 def get_embedding(text):
@@ -282,17 +253,6 @@ def get_conversation_context(session_id=DEFAULT_SESSION_ID, max_turns=4):
     # 返回最近 max_turns 轮对话
     return history[-max_turns * 2:] if len(history) > 2 else []
 
-def format_conversation_history(history):
-    """格式化对话历史为LLM可读格式"""
-    if not history:
-        return "（无历史对话）"
-
-    formatted = []
-    for msg in history:
-        role_name = "用户" if msg['role'] == 'user' else "助手"
-        formatted.append(f"{role_name}：{msg['content']}")
-    return "\n".join(formatted)
-
 def clear_conversation(session_id=DEFAULT_SESSION_ID):
     """清空指定会话的历史"""
     global CONVERSATION_HISTORY
@@ -328,252 +288,675 @@ def update_knowledge_embedding():
     print(f"知识库embedding更新完成，共 {len(KNOWLEDGE_EMBEDDINGS)} 条")
 
 
-def find_by_embedding(query, top_k=20):
-    """用embedding查找最匹配的知识库条目"""
-    # 获取查询的embedding
-    query_emb = get_embedding(query)
-    if not query_emb:
-        return []
+# ============= Agent 核心逻辑 =============
 
-    # 计算与所有知识库问题的相似度
-    scores = []
-    for i, item in enumerate(KNOWLEDGE):
-        if i in KNOWLEDGE_EMBEDDINGS:
-            sim = cosine_similarity(query_emb, KNOWLEDGE_EMBEDDINGS[i])
-            if sim > 0:
-                scores.append((sim, item))
-
-    # 排序返回top_k
-    scores.sort(key=lambda x: x[0], reverse=True)
-    return scores[:top_k]
-
-
-def find_best_match(query, top_k=20):
-    """查找最匹配的知识库条目"""
-    scores = []
-    for item in KNOWLEDGE:
-        score = calculate_similarity(query, item)
-        if score > 0:
-            scores.append((score, item))
-
-    # 排序并返回top_k
-    scores.sort(key=lambda x: x[0], reverse=True)
-    return scores[:top_k]
-
-def build_context_from_knowledge(query, matches):
-    """从知识库构建上下文"""
-    context_parts = []
-
-    # 添加系统提示
-    context_parts.append("""你是一个友好的雷池WAF智能客服助手。你的任务是根据知识库中的信息，用委婉的方式回答用户的问题。
-
-回答要求：
-1. 根据找到的参考资料回答，不要编造信息
-2. 回答要友好、委婉、有礼貌
-3. 如果用户问题与知识库中的问题相似，可以参考知识库中的处理结果
-4. 如果没有找到相关信息，礼貌地告知用户并建议其他获取帮助的方式""")
-
-    context_parts.append("\n\n以下是知识库中的相关问答：\n\n")
-
-    for i, (score, match) in enumerate(matches[:3], 1):
-        context_parts.append(f"参考{i}（相似度: {score:.2f}）：\n")
-        context_parts.append(f"问题：{match['问题描述']}\n")
-        context_parts.append(f"解答：{match['问题处理结果']}\n\n")
-
-    context_parts.append(f"\n用户问题：{query}\n")
-    context_parts.append("\n请根据以上知识库中的信息，用委婉友好的方式回答用户的问题。如果知识库中有相关解答，请参考并整理后回答。")
-
-    return "".join(context_parts)
-
-def get_llm_response(query, context):
-    """调用LLM API润色回答 - 预留"""
-    return None
-
-def get_llm_response_stream_v2(query, context, matches):
-    """调用LLM API - 先分析问题再用知识库检索最后生成答案"""
+def _ensure_client():
+    """确保OpenAI客户端可用"""
     global client
+    if not client and OPENAI_SDK_AVAILABLE and API_KEY:
+        try:
+            client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
+        except Exception as e:
+            print(f"客户端初始化失败: {e}")
+    return client is not None
 
-    if not client:
-        if OPENAI_SDK_AVAILABLE and API_KEY:
-            try:
-                client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
-            except Exception as e:
-                print(f"客户端初始化失败: {e}")
-                return None
 
-    if not client:
-        return None
+def _execute_tool_call(func_name, func_args, waf_agent=None):
+    """执行单个工具调用，返回结果dict"""
+    from waf_agent import execute_search_knowledge
 
-    try:
-        # 第一步：用LLM深度分析问题，理解问题本质
-        analysis_prompt = f"""请分析以下用户问题，进行深度理解：
-
-用户问题：{query}
-
-请从以下角度分析：
-1. 用户的核心问题/本质问题是什么？
-2. 这个问题的本质关键词是什么（忽略修饰词）？
-3. 用户可能的场景是什么（安装/配置/故障/授权/人机验证等）？
-
-只输出分析结果，用以下格式：
-【本质问题】：用户实际想问的核心问题（用简短的一句话描述）
-【本质关键词】：去掉修饰词后的核心关键词（用于知识库检索）
-【场景】：xxx
-
-分析结果："""
-
-        analysis_response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {'role': 'system', 'content': '你是雷池WAF技术支持专家，擅长理解用户问题的本质。'},
-                {'role': 'user', 'content': analysis_prompt}
-            ],
-            max_tokens=200,
-            temperature=0.3
+    if func_name == "search_knowledge":
+        return execute_search_knowledge(
+            query=func_args.get("query", ""),
+            knowledge_data=KNOWLEDGE,
+            knowledge_embeddings=KNOWLEDGE_EMBEDDINGS,
+            max_results=func_args.get("max_results", 5),
+            get_embedding_fn=get_embedding,
+            cosine_similarity_fn=cosine_similarity
         )
-        analysis_result = analysis_response.choices[0].message.content.strip()
-        print(f"LLM问题分析:\n{analysis_result}")
-
-        # 提取本质关键词（从分析结果中提取）
-        essential_keywords = ""
-        for line in analysis_result.split('\n'):
-            if '【本质关键词】' in line:
-                essential_keywords = line.split('【本质关键词】')[1].strip()
-                break
-
-        if not essential_keywords:
-            # 如果没提取到，用原始关键词
-            essential_keywords = query
-
-        print(f"本质关键词: {essential_keywords}")
-
-        # 第二步：用本质关键词重新检索知识库
-        keyword_matches = find_best_match(essential_keywords, top_k=10)
-
-        # 如果本质关键词检索结果不好，尝试提取本质问题再次检索
-        essential_question = ""
-        for line in analysis_result.split('\n'):
-            if '【本质问题】' in line:
-                essential_question = line.split('【本质问题】')[1].strip()
-                break
-
-        essential_matches = []
-        if essential_question and essential_question != query:
-            essential_matches = find_best_match(essential_question, top_k=10)
-            print(f"本质问题检索: {essential_question}, 匹配数: {len(essential_matches)}")
-
-        # 合并原始检索结果和本质关键词检索结果，去重
-        seen = set()
-        merged_matches = []
-        for score, item in matches + keyword_matches + essential_matches:
-            if item['问题描述'] not in seen:
-                seen.add(item['问题描述'])
-                merged_matches.append((score, item))
-        merged_matches.sort(key=lambda x: x[0], reverse=True)
-        merged_matches = merged_matches[:5]
-
-        print(f"合并后匹配数: {len(merged_matches)}")
-
-        # 构建新的上下文
-        new_context = build_context_from_knowledge(query, merged_matches)
-
-        # 第三步：用检索结果生成答案（包含问题分析）
-        prompt = f"""你是雷池WAF的高级技术支持客服。请根据以下内容回答用户问题。
-
-【问题分析】
-{analysis_result}
-
-【知识库内容】
-{new_context}
-
-用户问题：{query}
-
-请先简要说明你对问题的理解，然后根据知识库内容给出专业答案。"""
-
-        # 流式调用
-        stream = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {'role': 'system', 'content': '你是雷池WAF的高级技术支持专家，回答问题专业、礼貌、简洁。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            max_tokens=500,
-            temperature=0.7,
-            stream=True
-        )
-
-        # 流式yield
-        for chunk in stream:
-            if chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
-    except Exception as e:
-        print(f"LLM API调用失败: {e}")
-        return None
-
-
-def polish_answer_with_llm(query, answer):
-    """用LLM润色知识库答案"""
-    global client
-    if not client:
-        if OPENAI_SDK_AVAILABLE and API_KEY:
-            try:
-                client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
-            except:
-                return None
-
-    try:
-        prompt = f"""你是雷池WAF技术支持客服。请严格基于以下知识库答案回复用户。
-
-知识库答案：
-{answer}
-
-重要规则：
-1. 只基于知识库答案进行润色，不要添加任何知识库中没有的信息
-2. 保持语言友好、专业
-3. 如果知识库答案不完整，也不要自己补充信息
-4. 只润色表达方式，不改变答案内容
-
-请直接输出润色后的答案。"""
-
-        stream = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {'role': 'system', 'content': '你是雷池WAF技术支持专家，严格基于知识库内容回答问题，不添加任何知识库以外的信息。'},
-                {'role': 'user', 'content': prompt}
-            ],
-            max_tokens=500,
-            temperature=0.5,
-            stream=True
-        )
-
-        for chunk in stream:
-            if chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
-    except Exception as e:
-        print(f"LLM润色失败: {e}")
-        return None
-
-
-def polite_response(answer, query):
-    """将知识库答案转化为委婉的表达"""
-    # 如果答案较短，直接返回
-    if len(answer) < 50:
-        return f"根据您的问题，我来为您解答：{answer}"
-
-    # 根据问题类型添加不同的开场白
-    opening = ""
-    if any(kw in query for kw in ['如何', '怎么', '怎样', '方法', '操作']):
-        opening = "关于这个问题，您可以参考以下方法：\n\n"
-    elif any(kw in query for kw in ['可以', '能否', '是否', '有没有']):
-        opening = "针对您的疑问，我的回答如下：\n\n"
-    elif any(kw in query for kw in ['为什么', '原因', '是什么']):
-        opening = "让我为您解释一下：\n\n"
+    elif waf_agent:
+        return waf_agent.execute_tool(func_name, func_args)
     else:
-        opening = "根据我的了解，"
+        return {"success": False, "error": "WAF工具未配置，请提供WAF API地址和令牌"}
 
-    return opening + answer
+
+def _tool_name_to_display(func_name):
+    """将工具名转为中文显示名"""
+    name_map = {
+        "search_knowledge": "搜索知识库",
+        # 日志查询
+        "query_attack_logs": "查询攻击日志",
+        "get_attack_log_detail": "查询日志详情",
+        "query_attack_events": "查询攻击事件",
+        "query_qps": "查询QPS",
+        "get_rule_attack_logs": "查询规则攻击日志",
+        "export_attack_logs": "导出攻击日志",
+        # 规则管理
+        "list_custom_rules": "查询自定义规则",
+        "create_custom_rule": "创建自定义规则",
+        "toggle_rule": "切换规则状态",
+        "delete_rule": "删除规则",
+        "get_rule_detail": "查询规则详情",
+        "update_rule": "更新规则",
+        "order_rules": "规则排序",
+        # IP组管理
+        "list_ip_groups": "查询IP组",
+        "add_ip_to_group": "添加IP到组",
+        "create_ip_group": "创建IP组",
+        "get_ip_group_detail": "查询IP组详情",
+        "update_ip_group": "更新IP组",
+        "delete_ip_group": "删除IP组",
+        "get_crawler_group": "查询蜘蛛组",
+        "update_crawler_group": "更新蜘蛛组",
+        "get_ip_group_by_link": "通过链接获取IP",
+        "create_ip_group_by_link": "通过链接创建IP组",
+        # 站点管理
+        "list_sites": "查询站点列表",
+        "get_site_detail": "查询站点详情",
+        "health_check": "执行健康检查",
+        "set_site_health_check": "设置健康检查开关",
+        "set_site_mode": "设置站点模式",
+        "create_site": "创建站点",
+        "delete_site": "删除站点",
+        "update_site_basic_info": "更新站点信息",
+        "update_site_group": "更新站点分组",
+        "get_site_proxy": "查询代理配置",
+        "set_site_proxy": "设置代理配置",
+        "get_site_nginx_config": "查询Nginx配置",
+        "set_site_nginx_config": "设置Nginx配置",
+        "get_site_resources": "查询路由资源",
+        "manage_site_excludes": "管理路由排除",
+        "get_site_logs": "查询站点日志",
+        "manage_site_groups": "管理站点分组",
+        # 防护配置
+        "set_challenge": "设置人机验证",
+        "set_auth_defense": "设置身份认证",
+        "set_rate_limit": "设置频率限制",
+        "set_acl_enabled": "开关CC防护",
+        "get_acl_logs": "查询频率限制日志",
+        "release_acl_block": "解除IP封禁",
+        "manage_rate_limit": "管理频率限制",
+        "get_challenge_config": "查询人机验证配置",
+        "set_challenge_config": "设置人机验证配置",
+        "manage_anti_tamper": "管理反篡改",
+        "manage_dynamic_defense": "管理动态防护",
+        # 语义规则
+        "get_global_semantics": "查询全局语义",
+        "set_global_semantics": "设置全局语义",
+        "manage_site_semantics": "管理站点语义",
+        # 增强规则
+        "get_enhance_rules": "查询增强规则",
+        "update_enhance_rules": "更新增强规则",
+        "manage_enhance_rule_switch": "增强规则开关",
+        # 统计
+        "get_advance_stats": "查询高级统计",
+        "get_advance_trends": "查询趋势数据",
+        # 告警
+        "get_alarm_config": "查询告警配置",
+        "update_alarm_config": "更新告警配置",
+        # 认证防护
+        "manage_auth_sources": "管理认证源",
+        "list_auth_source_users": "查询认证源用户",
+        "manage_auth_defense_users": "管理认证防护用户",
+        "get_auth_defense_logs": "查询认证防护日志",
+        # 系统信息
+        "get_system_info": "查询系统信息",
+        "get_license": "查询授权信息",
+        "manage_license": "管理授权",
+        "manage_detector": "管理检测引擎",
+        "manage_log_clean": "管理日志清理",
+        "manage_api_token": "管理API Token",
+        "manage_global_proxy": "管理全局代理",
+        "manage_syslog": "管理Syslog",
+        "manage_ja4": "管理JA4配置",
+        "manage_network_proxy": "管理网络代理",
+        # 安全态势
+        "manage_security_posture": "管理安全态势",
+        # 等候室
+        "manage_waiting_room": "管理等候室",
+        # 门户
+        "manage_portal": "管理门户配置",
+        # 证书管理
+        "list_certs": "查询证书列表",
+        "get_cert_detail": "查询证书详情",
+        "manage_certs": "管理证书",
+        # 用户管理
+        "list_users": "查询控制台用户",
+        "manage_users": "管理控制台用户",
+        # 转发规则
+        "manage_forwarding_rules": "管理转发规则",
+        # 云策略
+        "manage_cloud_policies": "管理云策略",
+        # 拦截页面
+        "get_blocking_message": "查询拦截页面",
+        # 恶意IP情报
+        "manage_intelligence": "管理IP情报",
+        # 审计日志
+        "get_audit_log": "查询审计日志",
+        # 报告
+        "manage_report": "管理报告",
+        # 人机验证日志
+        "get_anti_bot_logs": "查询人机验证日志",
+    }
+    return name_map.get(func_name, func_name)
+
+
+def _format_waf_results(tool_calls, query):
+    """将WAF工具调用结果格式化为简洁汇总，供LLM分析用"""
+    import time as _time
+
+    parts = []
+
+    for tc in tool_calls:
+        name = tc['name']
+        result = tc['result']
+        display_name = tc['display_name']
+        success = result.get('success', False)
+
+        # 错误情况
+        if not success:
+            error = result.get('error', '未知错误')
+            if 'permission denied' in str(error).lower() or '权限不足' in str(error):
+                parts.append(f"{display_name}：权限不足")
+            else:
+                parts.append(f"{display_name}：失败 - {error}")
+            continue
+
+        # 写操作直接返回成功
+        if name in WRITE_TOOLS:
+            parts.append(f"{display_name}：操作成功")
+            continue
+
+        # 提取数据 - 自动查找result中第一个非空非元数据的值
+        # 跳过 success/total/stat_type/trend_type 等元数据键
+        skip_keys = {'success', 'total', 'stat_type', 'trend_type', 'error', 'tool_name'}
+        data = {}
+        for k, v in result.items():
+            if k not in skip_keys and v:
+                data = v
+                break
+        total = result.get('total', 0)
+
+        # 将数据统一为列表
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            # 尝试从字典中提取列表
+            items = data.get('data', data.get('logs', data.get('rules',
+                     data.get('sites', data.get('ipgroups', [])))))
+            if isinstance(items, dict):
+                items = [items]
+            if not total:
+                total = data.get('total', len(items) if isinstance(items, list) else 1)
+        else:
+            items = []
+
+        if not isinstance(items, list):
+            items = [items] if items else []
+
+        if not total and items:
+            total = len(items)
+
+        # === 所有查询结果统一为简洁汇总 ===
+
+        # 趋势类：只给首尾和关键数字
+        if name == 'get_advance_trends':
+            trend_type = result.get('trend_type', '')
+            type_names = {'access': '访问', 'intercept': '拦截'}
+            title = type_names.get(trend_type, trend_type)
+            if isinstance(items, list) and items:
+                counts = [item.get('count', 0) for item in items if isinstance(item, dict)]
+                first_t = items[0].get('time', 0) if isinstance(items[0], dict) else 0
+                last_t = items[-1].get('time', 0) if isinstance(items[-1], dict) else 0
+                t_start = _time.strftime('%H:%M', _time.localtime(first_t)) if first_t else '?'
+                t_end = _time.strftime('%H:%M', _time.localtime(last_t)) if last_t else '?'
+                parts.append(f"{title}趋势（{t_start}~{t_end}）：共{len(counts)}个数据点，最大{max(counts) if counts else 0}，最小{min(counts) if counts else 0}，合计{sum(counts)}")
+            else:
+                parts.append(f"{title}趋势：无数据")
+            continue
+
+        # 统计类：只给字段和值
+        if name == 'get_advance_stats':
+            stat_type = result.get('stat_type', '')
+            type_names = {'access': '访问', 'attack': '攻击', 'client': '客户端',
+                          'domain': '域名', 'location': '地理位置', 'page': '页面',
+                          'status_code': '状态码', 'error_status_code': '错误状态码'}
+            title = type_names.get(stat_type, stat_type)
+            if isinstance(data, dict):
+                summary = '、'.join(f'{k}={v}' for k, v in list(data.items())[:15])
+                parts.append(f"{title}统计：{summary}")
+            else:
+                parts.append(f"{title}统计：{data}")
+            continue
+
+        # 列表/日志类：只给总数和关键维度汇总
+        if items:
+            summaries = [f"共{total}条"]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                # 每条记录提取关键字段摘要
+                parts_list = []
+                for key, val in item.items():
+                    if val is None or val == '' or val == []:
+                        continue
+                    if isinstance(val, list):
+                        val = ', '.join(str(v) for v in val[:3])
+                    elif isinstance(val, dict):
+                        continue  # 跳过嵌套对象
+                    parts_list.append(f"{key}={val}")
+                if parts_list:
+                    summaries.append('；'.join(parts_list))
+            parts.append(f"{display_name}：" + ' | '.join(summaries))
+        elif isinstance(data, dict) and data:
+            # 详情类：只给关键字段
+            def _fmt_val(v):
+                if isinstance(v, list):
+                    return ', '.join(str(x) for x in v)
+                if isinstance(v, dict):
+                    return '...'
+                return str(v)
+            summary = '、'.join(f'{k}={_fmt_val(v)}' for k, v in list(data.items())[:20] if v is not None and v != '' and v != [])
+            parts.append(f"{display_name}：{summary}")
+        else:
+            parts.append(f"{display_name}：无数据")
+
+    return '\n\n'.join(parts) if parts else "操作完成，但未获取到数据。"
+
+
+def _format_record(item, index):
+    """格式化单条记录为简洁文本"""
+    if not isinstance(item, dict):
+        return f"{index}. {item}"
+    # 优先显示关键字段
+    priority_fields = ['name', 'title', 'ip', 'src_ip', 'dst_ip', 'domain',
+                       'server_names', 'url', 'method', 'attack_type', 'status',
+                       'action', 'username', 'role', 'comment', 'description',
+                       'created_at', 'updated_at', 'id', 'site_id', 'rule_id',
+                       'event_id', 'trigger_count', 'pass_count']
+    parts = []
+    for field in priority_fields:
+        if field in item and item[field]:
+            val = item[field]
+            if isinstance(val, list):
+                val = ', '.join(str(v) for v in val[:3])
+            parts.append(f"{field}={val}")
+    if not parts:
+        # 没有优先字段，显示前3个字段
+        for k, v in list(item.items())[:3]:
+            parts.append(f"{k}={v}")
+    return f"{index}. {' | '.join(parts)}"
+
+
+# 写操作工具集合（模块级别，供多处使用）
+WRITE_TOOLS = {
+    'create_custom_rule', 'toggle_rule', 'delete_rule', 'update_rule', 'order_rules',
+    'add_ip_to_group', 'create_ip_group', 'update_ip_group', 'delete_ip_group',
+    'update_crawler_group', 'create_ip_group_by_link',
+    'set_site_mode', 'set_site_health_check', 'create_site', 'delete_site',
+    'update_site_basic_info', 'update_site_group', 'set_site_proxy',
+    'set_site_nginx_config', 'manage_site_excludes', 'manage_site_groups',
+    'set_challenge', 'set_auth_defense', 'set_rate_limit', 'release_acl_block',
+    'manage_rate_limit', 'set_challenge_config', 'manage_anti_tamper',
+    'manage_dynamic_defense',
+    'set_global_semantics', 'manage_site_semantics',
+    'update_enhance_rules', 'manage_enhance_rule_switch',
+    'update_alarm_config',
+    'manage_auth_sources', 'manage_auth_defense_users',
+    'manage_license', 'manage_detector', 'manage_log_clean',
+    'manage_api_token', 'manage_global_proxy', 'manage_syslog', 'manage_ja4',
+    'manage_network_proxy', 'manage_security_posture', 'manage_waiting_room',
+    'manage_portal', 'manage_users', 'manage_certs',
+    'manage_forwarding_rules', 'manage_cloud_policies',
+    'get_blocking_message', 'manage_intelligence', 'manage_report'
+}
+
+
+def agent_chat_stream(query, session_id, waf_base_url=None, waf_api_token=None):
+    """
+    Agent循环 - 流式SSE生成器
+    LLM自主决定调用工具，支持多步推理
+    """
+    # 写操作工具列表，调用过这些工具的查询不缓存结果
+    has_write_op = False
+    has_waf_tool_called = False  # 跟踪是否调用了WAF工具
+    has_any_tool_called = False  # 跟踪是否调用了任何工具（包括search_knowledge）
+    from waf_agent import WAFAgent, search_knowledge_tool_schema
+
+    if not _ensure_client():
+        yield f"data: {json.dumps({'type': 'chunk', 'content': '抱歉，AI服务暂时不可用。'})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
+        return
+
+    # 准备工具schema
+    tools_schema = [search_knowledge_tool_schema()]
+    waf_agent = None
+
+    if waf_base_url and waf_api_token:
+        try:
+            waf_agent = WAFAgent(waf_base_url, waf_api_token, verify_ssl=False)
+            tools_schema.extend(waf_agent.get_tools_schema())
+        except Exception as e:
+            print(f"WAF Agent初始化失败: {e}")
+
+    # 构建消息
+    conv_history = get_conversation_context(session_id)
+    messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT + _get_date_prompt()}]
+    for msg in conv_history:
+        messages.append({"role": msg['role'], "content": msg['content']})
+    messages.append({"role": "user", "content": query})
+
+    # Agent循环
+    for step in range(MAX_AGENT_STEPS):
+        try:
+            # 非流式调用，让LLM决定是否调用工具
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=tools_schema,
+                tool_choice="auto",
+                max_tokens=1500,
+                temperature=0.3,
+                stream=False
+            )
+        except Exception as e:
+            print(f"LLM调用失败(step {step}): {e}")
+            yield f"data: {json.dumps({'type': 'chunk', 'content': '抱歉，AI服务调用失败，请稍后重试。'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
+            return
+
+        message = response.choices[0].message
+
+        if hasattr(message, 'tool_calls') and message.tool_calls:
+            # 将助手消息（含tool_calls）加入历史
+            msg_dict = {
+                "role": "assistant",
+                "content": message.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in message.tool_calls
+                ]
+            }
+            messages.append(msg_dict)
+
+            # 执行每个工具调用
+            called_waf_tools = []  # 收集WAF工具调用及结果
+            called_search_knowledge = False
+            knowledge_result = None
+
+            for tool_call in message.tool_calls:
+                func_name = tool_call.function.name
+                try:
+                    func_args = json.loads(tool_call.function.arguments)
+                except Exception:
+                    func_args = {}
+
+                # 发送thinking事件，让用户看到Agent在做什么
+                display_name = _tool_name_to_display(func_name)
+                yield f"data: {json.dumps({'type': 'thinking', 'content': f'正在{display_name}...'})}\n\n"
+                print(f"Agent调用工具: {func_name}({func_args})")
+
+                # 执行工具（捕获异常，避免生成器崩溃导致前端卡死）
+                try:
+                    result = _execute_tool_call(func_name, func_args, waf_agent)
+                except Exception as e:
+                    print(f"工具执行异常: {func_name}, 错误: {e}")
+                    result = {'success': False, 'error': f'工具执行异常: {str(e)}'}
+
+                # 标记是否有写操作
+                if func_name in WRITE_TOOLS:
+                    has_write_op = True
+
+                # 区分知识库搜索和WAF工具
+                if func_name == 'search_knowledge':
+                    called_search_knowledge = True
+                    knowledge_result = result
+                else:
+                    has_waf_tool_called = True
+                    called_waf_tools.append({
+                        'name': func_name,
+                        'display_name': display_name,
+                        'args': func_args,
+                        'result': result
+                    })
+                has_any_tool_called = True
+
+                # 将工具结果加入消息
+                # WAF工具结果：先用_format_waf_results格式化为可读文本，再传给LLM分析
+                if func_name != 'search_knowledge' and func_name in [t['name'] for t in called_waf_tools]:
+                    # WAF工具：用格式化文本替代原始JSON，让LLM拿到可读的输入
+                    try:
+                        formatted = _format_waf_results([{
+                            'name': func_name,
+                            'display_name': display_name,
+                            'args': func_args,
+                            'result': result
+                        }], query)
+                        result_str = formatted
+                    except Exception:
+                        result_str = json.dumps(result, ensure_ascii=False)
+                else:
+                    # 知识库搜索：保留原始JSON
+                    try:
+                        result_str = json.dumps(result, ensure_ascii=False)
+                    except Exception:
+                        result_str = str(result)
+
+                if len(result_str) > 3000:
+                    result_str = result_str[:3000] + "...(结果已截断)"
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result_str
+                })
+
+            # 工具结果已加入消息，继续Agent循环让LLM决定是否还需调工具或直接回答
+
+        else:
+            # LLM返回最终文本回答 - 检查是否应该先搜索知识库
+            text_content = message.content or ""
+            print(f"[Agent] LLM返回文本回复，content长度={len(text_content)}", flush=True)
+
+            # 如果LLM有WAF配置但没调用任何工具，提示它使用工具重试（仅重试1次）
+            if waf_agent and not has_any_tool_called and step == 0:
+                print(f"[Agent] LLM有WAF工具但未调用任何工具，提示重试", flush=True)
+                messages.append({"role": "assistant", "content": text_content})
+                messages.append({"role": "user", "content": "请注意：你有WAF工具可用，请调用合适的WAF工具来获取数据回答我的问题，不要自己编造信息。"})
+                continue
+
+            # 如果LLM没调用任何工具就回复了"超出能力范围"，强制补调search_knowledge
+            if '超出' in text_content and '能力范围' in text_content:
+                print(f"[Agent] LLM未搜索知识库直接回复超出能力范围，强制补调search_knowledge", flush=True)
+                from waf_agent import execute_search_knowledge
+                yield f"data: {json.dumps({'type': 'thinking', 'content': '正在搜索知识库...'})}\n\n"
+                kb_result = execute_search_knowledge(
+                    query=query,
+                    knowledge_data=KNOWLEDGE,
+                    knowledge_embeddings=KNOWLEDGE_EMBEDDINGS,
+                    max_results=5,
+                    get_embedding_fn=get_embedding,
+                    cosine_similarity_fn=cosine_similarity
+                )
+                if kb_result.get('total', 0) > 0:
+                    # 知识库有结果，让LLM基于结果回答
+                    messages.append({"role": "assistant", "content": "", "tool_calls": [{"id": "auto_search", "type": "function", "function": {"name": "search_knowledge", "arguments": json.dumps({"query": query})}}]})
+                    messages.append({"role": "tool", "tool_call_id": "auto_search", "content": json.dumps(kb_result, ensure_ascii=False)})
+                    # 重新调用LLM
+                    try:
+                        stream = client.chat.completions.create(
+                            model=MODEL,
+                            messages=messages,
+                            max_tokens=2000,
+                            temperature=0.3,
+                            stream=True
+                        )
+                        answer_chunks = []
+                        for chunk in stream:
+                            if chunk.choices[0].delta.content:
+                                content = chunk.choices[0].delta.content
+                                answer_chunks.append(content)
+                                yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+                        bot_response = ''.join(answer_chunks)
+                        if bot_response:
+                            add_to_conversation(session_id, 'assistant', bot_response)
+                        yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
+                    except Exception as e:
+                        print(f"补调知识库后LLM调用失败: {e}")
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': text_content})}\n\n"
+                        yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
+                    return
+                # 知识库确实没结果，输出原回复
+
+            # 流式输出
+            try:
+                stream = client.chat.completions.create(
+                    model=MODEL,
+                    messages=messages,
+                    max_tokens=2000,
+                    temperature=0.3,
+                    stream=True
+                )
+
+                answer_chunks = []
+                finish_reason = None
+                for chunk in stream:
+                    if chunk.choices[0].delta.content:
+                        content = chunk.choices[0].delta.content
+                        answer_chunks.append(content)
+                        yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+                    if chunk.choices[0].finish_reason:
+                        finish_reason = chunk.choices[0].finish_reason
+
+                # 如果因token限制被截断，添加提示
+                if finish_reason == 'length':
+                    truncation_notice = "\n\n（回答因长度限制被截断，请继续提问获取更多信息）"
+                    answer_chunks.append(truncation_notice)
+                    yield f"data: {json.dumps({'type': 'chunk', 'content': truncation_notice})}\n\n"
+
+                # 保存到对话历史和缓存
+                bot_response = ''.join(answer_chunks)
+                if bot_response:
+                    add_to_conversation(session_id, 'assistant', bot_response)
+                    # 缓存策略：
+                    # 1. 写操作不缓存，避免重复执行
+                    # 2. 没有调用任何工具时不缓存（LLM可能编造了数据）
+                    # 3. 有WAF配置但没调用WAF工具时不缓存（LLM可能跳过了应调用的工具）
+                    # 4. 只调用了search_knowledge的知识类问题可以缓存
+                    should_cache = False
+                    if not has_write_op:
+                        if not has_any_tool_called:
+                            print(f"[缓存跳过] 未调用任何工具，不缓存此结果", flush=True)
+                        elif waf_base_url and waf_api_token and not has_waf_tool_called:
+                            print(f"[缓存跳过] WAF配置可用但未调用WAF工具，不缓存此结果", flush=True)
+                        else:
+                            should_cache = True
+                    if should_cache:
+                        save_to_cache(query, answer_chunks, llm_used=True)
+
+                yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
+            except Exception as e:
+                print(f"流式输出失败: {e}")
+                # 使用非流式的回答作为回退
+                content = message.content or "抱歉，生成回答时出现错误。"
+                yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
+                add_to_conversation(session_id, 'assistant', content)
+                yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
+            return
+
+    # 超过最大步数
+    yield f"data: {json.dumps({'type': 'chunk', 'content': '抱歉，处理您的问题需要过多步骤，请尝试更具体地描述需求。'})}\n\n"
+    yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
+
+
+def agent_chat_sync(query, session_id='dingtalk', waf_base_url=None, waf_api_token=None):
+    """Agent循环 - 同步版本，用于钉钉等非流式场景"""
+    from waf_agent import WAFAgent, search_knowledge_tool_schema
+
+    if not _ensure_client():
+        return None
+
+    tools_schema = [search_knowledge_tool_schema()]
+    waf_agent = None
+
+    if waf_base_url and waf_api_token:
+        try:
+            waf_agent = WAFAgent(waf_base_url, waf_api_token, verify_ssl=False)
+            tools_schema.extend(waf_agent.get_tools_schema())
+        except Exception as e:
+            print(f"WAF Agent初始化失败: {e}")
+
+    conv_history = get_conversation_context(session_id)
+    messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+    for msg in conv_history:
+        messages.append({"role": msg['role'], "content": msg['content']})
+    messages.append({"role": "user", "content": query})
+
+    for step in range(MAX_AGENT_STEPS):
+        try:
+            response = client.chat.completions.create(
+                model=MODEL,
+                messages=messages,
+                tools=tools_schema,
+                tool_choice="auto",
+                max_tokens=2000,
+                temperature=0.3,
+                stream=False
+            )
+        except Exception as e:
+            print(f"LLM调用失败: {e}")
+            return None
+
+        message = response.choices[0].message
+
+        if hasattr(message, 'tool_calls') and message.tool_calls:
+            messages.append({
+                "role": "assistant",
+                "content": message.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in message.tool_calls
+                ]
+            })
+
+            for tool_call in message.tool_calls:
+                func_name = tool_call.function.name
+                try:
+                    func_args = json.loads(tool_call.function.arguments)
+                except Exception:
+                    func_args = {}
+
+                result = _execute_tool_call(func_name, func_args, waf_agent)
+                result_str = json.dumps(result, ensure_ascii=False)
+                if len(result_str) > 3000:
+                    result_str = result_str[:3000] + "...(结果已截断)"
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result_str
+                })
+            continue
+        else:
+            content = message.content
+            if content:
+                add_to_conversation(session_id, 'assistant', content)
+            return content
+
+    return None
 
 @app.route('/')
 def index():
@@ -649,10 +1032,16 @@ def add_to_knowledge():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """问答接口 - 流式输出（优化版）"""
+    """问答接口 - Agent模式，LLM自主决定调用工具"""
     data = request.get_json()
     query = data.get('message', '').strip()
     session_id = data.get('session_id', DEFAULT_SESSION_ID)
+    waf_base_url = data.get('waf_base_url', '').strip()
+    waf_api_token = data.get('waf_api_token', '').strip()
+
+    # 规范化WAF地址：确保以/api结尾
+    if waf_base_url and not waf_base_url.rstrip('/').endswith('/api'):
+        waf_base_url = waf_base_url.rstrip('/') + '/api'
 
     if not query:
         return jsonify({'error': '问题不能为空'}), 400
@@ -660,10 +1049,19 @@ def chat():
     # 保存用户问题到对话历史
     add_to_conversation(session_id, 'user', query)
 
-    # 第一步：检查缓存
+    print(f"查询: {query}", flush=True)
+    print(f"WAF配置: base_url={waf_base_url}, token_len={len(waf_api_token)}", flush=True)
+
+    # 如果有WAF配置，清除旧缓存（避免命中之前无配置时的错误回答）
+    if waf_base_url and waf_api_token:
+        normalized = normalize_query(query)
+        if normalized in QUERY_CACHE:
+            print(f"清除旧缓存（WAF配置已更新）", flush=True)
+            del QUERY_CACHE[normalized]
+
+    # 检查缓存
     cached = get_from_cache(query)
     if cached:
-        # 从缓存返回答案
         def generate_from_cache():
             yield "data: {\"type\":\"start\"}\n\n"
             for chunk in cached['answer_chunks']:
@@ -675,203 +1073,13 @@ def chat():
             'X-Accel-Buffering': 'no'
         })
 
-    print(f"查询: {query}")
-
-    # 第二步：LLM分析用户问题，提取关键信息
-    print("正在分析用户问题...")
-    try:
-        global client
-        if not client and OPENAI_SDK_AVAILABLE and API_KEY:
-            try:
-                client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
-            except:
-                pass
-
-        analysis_response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
-                {'role': 'system', 'content': '你是雷池WAF技术支持专家。请分析用户问题，提取关键信息和意图。'},
-                {'role': 'user', 'content': f"""用户问题：{query}
-
-请分析这个问题，提取以下信息：
-1. 问题的核心意图（如：配置、报错、日志分析、规则设置等）
-2. 关键词（3-5个最相关的技术术语）
-3. 问题的模块/功能（如：WAF、CC防护、规则引擎等）
-
-请以JSON格式返回分析结果：
-{{
-  "intent": "问题意图",
-  "keywords": ["关键词1", "关键词2", "关键词3"],
-  "module": "相关模块"
-}}"""},
-            ],
-            max_tokens=200,
-            temperature=0.3
-        )
-        analysis_result = json.loads(analysis_response.choices[0].message.content.strip())
-        print(f"问题分析结果: {analysis_result}")
-    except Exception as e:
-        print(f"问题分析失败: {e}，使用原问题检索")
-        analysis_result = {'keywords': [query], 'intent': 'general', 'module': 'general'}
-
-    # 第三步：基于embedding向量检索知识库
-    # 直接使用embedding向量匹配，比关键词匹配更准确
-    print(f"使用embedding向量检索: {query}")
-    all_matches = find_by_embedding(query, top_k=20)
-
-    # 去重
-    seen = {}
-    merged_matches = []
-    for score, match in all_matches:
-        if match['问题描述'] not in seen:
-            seen[match['问题描述']] = score
-            merged_matches.append((score, match))
-
-    # 按相似度排序
-    merged_matches.sort(key=lambda x: x[0], reverse=True)
-    merged_matches = merged_matches[:10]
-    print(f"检索匹配: {len(merged_matches)} 条")
-
-    # 第四步：获取对话上下文
-    conv_history = get_conversation_context(session_id)
-    conv_context = format_conversation_history(conv_history) if conv_history else ""
-
-    # 第五步：检查高匹配度答案并构建知识库上下文
-    high_matches = [(score, match) for score, match in merged_matches if score >= SIMILARITY_THRESHOLD]
-    print(f"高匹配度答案（score>={SIMILARITY_THRESHOLD}）: {len(high_matches)} 条")
-
-    if high_matches:
-        # 有多个高匹配度答案，构建包含所有答案的上下文
-        knowledge_context_parts = ["【知识库参考内容】\n\n以下是知识库中相似度较高的答案，请整合后回复：\n\n"]
-        for i, (score, match) in enumerate(high_matches[:5], 1):
-            knowledge_context_parts.append(f"答案{i}（相似度: {score:.2f}）：\n")
-            knowledge_context_parts.append(f"问题：{match['问题描述']}\n")
-            knowledge_context_parts.append(f"解答：{match['问题处理结果']}\n\n")
-        knowledge_context = "".join(knowledge_context_parts)
-    else:
-        # 没有高匹配度答案
-        knowledge_context_parts = ["【知识库参考内容】\n\n"]
-        for i, (score, match) in enumerate(merged_matches[:3], 1):
-            knowledge_context_parts.append(f"参考{i}（相似度: {score:.2f}）：\n")
-            knowledge_context_parts.append(f"问题：{match['问题描述']}\n")
-            knowledge_context_parts.append(f"解答：{match['问题处理结果']}\n\n")
-        knowledge_context = "".join(knowledge_context_parts)
-
-    # 第六步：LLM基于知识库生成答案
-
-    # 如果没有匹配结果，返回固定话术
-    if not merged_matches:
-        def generate_no_match():
-            yield "data: {\"type\":\"start\"}\n\n"
-            yield f"data: {json.dumps({'type': 'chunk', 'content': '抱歉，此问题超出我的能力范畴，请联系群里相关的技术人员。'})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
-        return Response(generate_no_match(), mimetype='text/event-stream', headers={
-            'Cache-Control': 'no-cache',
-            'Connection': 'keep-alive',
-            'X-Accel-Buffering': 'no'
-        })
-
-    # 有多个高匹配度答案，LLM整合多个答案
-    if len(high_matches) >= 2:
-        prompt = f"""你是雷池WAF技术支持客服。请整合以下多个知识库答案后回复用户。
-
-{knowledge_context}
-
-用户问题：{query}
-
-问题分析结果：
-- 意图：{analysis_result.get('intent', '未知')}
-- 关键词：{', '.join(analysis_result.get('keywords', []))}
-
-重要规则：
-1. 只整合知识库中提供的答案，不要添加任何知识库以外的信息
-2. 如果多个答案之间有冲突，请指出并提供最合适的建议
-3. 整合后的答案应该全面、准确
-4. 不要编造或假设任何知识库中没有的内容
-
-请整合以上知识库答案，给出一个完整、准确的回复。"""
-    else:
-        # 单个答案或没有高匹配度，正常生成
-        prompt = f"""你是雷池WAF技术支持客服。请严格按照以下知识库内容回答用户问题。
-
-【知识库内容】
-{knowledge_context}
-
-用户问题：{query}
-
-问题分析结果：
-- 意图：{analysis_result.get('intent', '未知')}
-- 关键词：{', '.join(analysis_result.get('keywords', []))}
-
-重要规则：
-1. 只使用知识库中提供的信息进行回答
-2. 如果知识库内容可以回答问题，请直接给出答案
-3. 如果知识库内容不完整或与问题不完全相关，请基于知识库内容尽力回答
-4. 不要添加任何知识库以外的信息
-5. 不要编造或假设任何知识库中没有的内容
-6. 只使用知识库中的答案，不要使用外部知识
-
-请基于知识库内容回答用户问题。"""
-
-    def generate_optimized():
+    # Agent循环流式输出
+    def generate_agent():
         yield "data: {\"type\":\"start\"}\n\n"
+        for event in agent_chat_stream(query, session_id, waf_base_url, waf_api_token):
+            yield event
 
-        global client
-        if not client and OPENAI_SDK_AVAILABLE and API_KEY:
-            try:
-                client = openai.OpenAI(api_key=API_KEY, base_url=BASE_URL)
-            except:
-                pass
-
-        if not client:
-            # LLM不可用，直接返回最佳答案
-            best_answer = high_matches[0][1] if high_matches else (merged_matches[0][1] if merged_matches else '抱歉，服务暂时不可用。')
-            for chunk in best_answer['问题处理结果'] if isinstance(best_answer, dict) else best_answer:
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
-            return
-
-        try:
-            stream = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {'role': 'system', 'content': '你是雷池WAF技术支持专家，严格基于知识库内容回答问题。如果知识库没有相关内容，必须如实告知用户，绝不编造信息。'},
-                    {'role': 'user', 'content': prompt}
-                ],
-                max_tokens=600,
-                temperature=0.5,
-                stream=True
-            )
-
-            # 流式输出并缓存
-            answer_chunks = []
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    content = chunk.choices[0].delta.content
-                    answer_chunks.append(content)
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': content})}\n\n"
-
-            # 缓存答案
-            save_to_cache(query, answer_chunks, llm_used=True)
-
-            # 保存助手回复到对话历史
-            bot_response = ''.join(answer_chunks)
-            add_to_conversation(session_id, 'assistant', bot_response)
-
-            yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
-
-        except Exception as e:
-            print(f"LLM API调用失败: {e}")
-            import traceback
-            traceback.print_exc()
-            # 返回知识库答案作为后备
-            fallback_match = high_matches[0][1] if high_matches else (merged_matches[0][1] if merged_matches else None)
-            fallback_answer = fallback_match.get('问题处理结果', '抱歉，服务暂时不可用，请稍后重试。') if fallback_match else '抱歉，服务暂时不可用。'
-            for chunk in fallback_answer:
-                yield f"data: {json.dumps({'type': 'chunk', 'content': chunk})}\n\n"
-            yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
-
-    return Response(generate_optimized(), mimetype='text/event-stream', headers={
+    return Response(generate_agent(), mimetype='text/event-stream', headers={
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
         'X-Accel-Buffering': 'no'
@@ -886,6 +1094,33 @@ def health():
         'cache_size': len(QUERY_CACHE),
         'embedding_cache_size': len(KNOWLEDGE_EMBEDDINGS)
     })
+
+@app.route('/api/waf/test', methods=['POST'])
+def test_waf_connection():
+    """验证WAF连接和API Token是否有效"""
+    data = request.get_json(force=True)
+    waf_base_url = data.get('waf_base_url', '').strip()
+    waf_api_token = data.get('waf_api_token', '').strip()
+
+    if not waf_base_url or not waf_api_token:
+        return jsonify({'connected': False, 'error': '请填写WAF地址和API Token'})
+
+    if not waf_base_url.rstrip('/').endswith('/api'):
+        waf_base_url = waf_base_url.rstrip('/') + '/api'
+
+    try:
+        from waf_tools import WAFClient
+        client = WAFClient(waf_base_url, waf_api_token, verify_ssl=False)
+        result = client.get('/open/site', params={'page': 1, 'page_size': 1})
+        return jsonify({'connected': True, 'sites_total': result.get('data', {}).get('total', 0)})
+    except Exception as e:
+        err_msg = str(e)
+        if 'invalid-permission' in err_msg or 'Token' in err_msg:
+            return jsonify({'connected': False, 'error': 'API Token无效或无权限，请在雷池管理界面「系统设置→通用配置→API接口」中确认Token'})
+        elif 'login-required' in err_msg:
+            return jsonify({'connected': False, 'error': 'API Token无效，需要重新生成'})
+        else:
+            return jsonify({'connected': False, 'error': f'连接失败: {err_msg}'})
 
 @app.route('/api/cache/clear', methods=['POST'])
 def clear_query_cache():
@@ -1139,27 +1374,11 @@ def dingtalk_bot():
 
     print(f"钉钉机器人收到消息: {text}")
 
-    # 调用chat接口获取答案
-    matches = find_best_match(text)
+    # 使用Agent同步接口获取答案
+    answer = agent_chat_sync(text, session_id=f'dingtalk_{session_id or "default"}')
 
-    if not matches:
+    if not answer:
         answer = '抱歉，我没有找到与您问题相关的答案。'
-    else:
-        # 使用LLM生成答案
-        best_score, best_match = matches[0]
-        context = build_context_from_knowledge(text, matches)
-
-        # 调用LLM获取答案
-        llm_answer = get_llm_response_stream_v2(text, context, matches)
-
-        if llm_answer:
-            answer_chunks = []
-            for chunk in llm_answer:
-                if chunk:
-                    answer_chunks.append(chunk)
-            answer = ''.join(answer_chunks) if answer_chunks else best_match['问题处理结果']
-        else:
-            answer = best_match['问题处理结果']
 
     # 生成签名
     timestamp, sign = generate_dingtalk_sign(DINGTALK_SECRET)
@@ -1226,25 +1445,25 @@ def ocr_image():
 
 @app.route('/api/chat_with_image', methods=['POST'])
 def chat_with_image():
-    """图片识别问答接口 - 流式输出"""
+    """图片识别问答接口 - Agent模式"""
     data = request.get_json()
     query = data.get('message', '').strip()
     image_data = data.get('image', '')
-    ocr_text = data.get('ocrText', '')  # 获取OCR识别结果
+    ocr_text = data.get('ocrText', '')
+    session_id = data.get('session_id', DEFAULT_SESSION_ID)
 
     if not image_data:
         return jsonify({'error': '图片不能为空'}), 400
 
     print(f"图片识别查询: {query}")
-    print(f"OCR识别结果: {ocr_text[:100] if ocr_text else '无'}...")
 
     # 提取base64数据
     if ',' in image_data:
         image_data = image_data.split(',')[1]
 
     try:
-        # 构建多模态消息
-        vision_prompt = "你是一个专业的WAF技术支持助手。请仔细分析这张图片，描述图片中的内容。如果图片中有文字、错误信息、配置界面、日志等内容，请详细描述。\n"
+        # 第一步：视觉模型识别图片
+        vision_prompt = "请仔细分析这张图片，描述图片中的内容。如果图片中有文字、错误信息、配置界面、日志等内容，请详细描述。\n"
         if ocr_text:
             vision_prompt += f"\n图片中识别到的文字：{ocr_text}\n"
         if query:
@@ -1255,7 +1474,6 @@ def chat_with_image():
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}}
         ]
 
-        # 调用视觉模型识别图片
         vision_response = client.chat.completions.create(
             model=MODEL_VISION,
             messages=[
@@ -1269,68 +1487,18 @@ def chat_with_image():
         vision_result = vision_response.choices[0].message.content.strip()
         print(f"视觉识别结果: {vision_result[:100]}...")
 
-        # 用识别结果检索知识库
-        combined_query = f"{query} {vision_result}" if query else vision_result
-        emb_matches = find_by_embedding(combined_query, top_k=10)
-        kw_matches = find_best_match(combined_query)
+        # 第二步：将识别结果作为用户问题，通过Agent回答
+        combined_query = f"{query}\n\n【图片识别结果】：{vision_result}" if query else f"请根据图片内容回答：\n\n{vision_result}"
 
-        seen = set()
-        merged_matches = []
-        for score, item in emb_matches + kw_matches:
-            if item['问题描述'] not in seen:
-                seen.add(item['问题描述'])
-                merged_matches.append((score, item))
-        merged_matches.sort(key=lambda x: x[0], reverse=True)
-        matches = merged_matches[:5]
+        # 保存用户消息到对话历史
+        add_to_conversation(session_id, 'user', query or '图片提问')
 
-        def generate_response():
+        def generate_agent_response():
             yield "data: {\"type\":\"start\"}\n\n"
+            for event in agent_chat_stream(combined_query, session_id):
+                yield event
 
-            if matches:
-                context_parts = ["根据图片识别结果和知识库，请回答用户问题：\n\n"]
-                for i, (score, match) in enumerate(matches[:3], 1):
-                    context_parts.append(f"参考{i}：\n问题：{match['问题描述']}\n解答：{match['问题处理结果']}\n\n")
-                context = "".join(context_parts)
-                prompt = f"""图片识别结果：{vision_result}
-
-{context}
-
-用户问题：{query if query else '请根据图片内容回答'}
-
-重要规则：
-1. 严格基于知识库内容回答
-2. 如果知识库没有相关内容，明确说明"知识库中没有找到相关内容"
-3. 不要添加任何知识库以外的信息
-4. 只使用知识库中提供的信息
-
-请基于知识库内容回答用户问题。"""
-            else:
-                prompt = f"图片识别结果：{vision_result}\n\n用户问题：{query if query else '请描述图片内容'}\n\n说明：知识库中没有找到相关内容，只能基于图片识别结果回复。"
-
-            stream = client.chat.completions.create(
-                model=MODEL,
-                messages=[
-                    {'role': 'system', 'content': '你是雷池WAF技术支持专家，严格基于知识库内容回答问题。如果知识库没有相关内容，必须如实告知用户，绝不编造信息。'},
-                    {'role': 'user', 'content': prompt}
-                ],
-                max_tokens=500,
-                temperature=0.5,
-                stream=True
-            )
-
-            has_content = False
-            for chunk in stream:
-                if chunk.choices[0].delta.content:
-                    has_content = True
-                    yield f"data: {json.dumps({'type': 'chunk', 'content': chunk.choices[0].delta.content})}\n\n"
-
-            if has_content:
-                yield f"data: {json.dumps({'type': 'done', 'llm_used': True})}\n\n"
-            else:
-                yield f"data: {json.dumps({'type': 'chunk', 'content': f'根据图片识别结果：{vision_result}'})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'llm_used': False})}\n\n"
-
-        return Response(generate_response(), mimetype='text/event-stream', headers={
+        return Response(generate_agent_response(), mimetype='text/event-stream', headers={
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
             'X-Accel-Buffering': 'no'
@@ -1354,8 +1522,10 @@ def chat_with_image():
 
 
 if __name__ == '__main__':
+    import os
+    FLASK_PORT = int(os.getenv('FLASK_PORT', 5001))
     print(f"知识库已加载，共 {len(KNOWLEDGE)} 条问答")
     # 启动时计算所有知识库的embedding
     update_knowledge_embedding()
-    print("服务启动中...")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print(f"服务启动中... 端口: {FLASK_PORT}")
+    app.run(host='0.0.0.0', port=FLASK_PORT, debug=True)
